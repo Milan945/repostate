@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """repostate: keep a repo's tasks, goals, progress, reviews and decisions as JSON.
 
-Every record is one JSON file under .repostate/<scope>/<type>/<id>.json, where
-scope is "team" (committed to git) or "personal" (gitignored). The viewer,
+Each type is one JSON file, .repostate/<scope>/<type>.json, holding every record
+of that type, one record per line. Scope is "team" (committed to git) or
+"personal" (gitignored). The viewer,
 .repostate/index.html, reads .repostate/data.js, which `build` regenerates
 after every write.
 
@@ -21,7 +22,7 @@ import sys
 import time
 import webbrowser
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 STATE_DIR = ".repostate"
 SCOPES = ("team", "personal")
 ID_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
@@ -109,6 +110,15 @@ config.local.json
 data.js
 .lock
 """
+
+
+GITATTRIBUTES = """# repostate: merge type files record by record (enabled per clone by `repostate.py hooks`)
+team/*.json merge=repostate
+team/archive/*.json merge=repostate
+"""
+
+MERGE_DRIVER = ('PY=python3; command -v python3 >/dev/null 2>&1 || PY=python; '
+                '"$PY" %s/repostate.py merge-file %%O %%A %%B' % STATE_DIR)
 
 
 class StateError(Exception):
@@ -318,64 +328,141 @@ class Store:
 
         return _Lock()
 
-    # ---- records
-    def record_path(self, scope, rtype, rid, archived=False):
-        parts = [self.dir, scope]
-        if archived:
-            parts.append("archive")
-        parts += [rtype, rid + ".json"]
+    # ---- records: one file per type, one record per line
+    def type_path(self, scope, rtype, archived=False):
+        parts = [self.dir, scope] + (["archive"] if archived else []) + [rtype + ".json"]
         return os.path.join(*parts)
 
-    def iter_files(self):
-        """Yield (scope, type, archived, path) for every record file."""
+    def legacy_dir(self, scope, rtype, archived=False):
+        """Folder used before 0.3, when every record was its own file."""
+        return self.type_path(scope, rtype, archived)[:-5]
+
+    def groups(self):
+        """Every (scope, type, archived) that has a type file or a legacy folder."""
+        found = []
         for scope in SCOPES:
-            base = os.path.join(self.dir, scope)
-            if not os.path.isdir(base):
-                continue
-            for archived, root in ((False, base), (True, os.path.join(base, "archive"))):
-                if not os.path.isdir(root):
+            for archived in (False, True):
+                base = os.path.join(self.dir, scope, "archive") if archived else os.path.join(self.dir, scope)
+                if not os.path.isdir(base):
                     continue
-                for rtype in sorted(os.listdir(root)):
-                    tdir = os.path.join(root, rtype)
-                    if rtype == "archive" or not os.path.isdir(tdir):
-                        continue
-                    for name in sorted(os.listdir(tdir)):
-                        if name.endswith(".json"):
-                            yield scope, rtype, archived, os.path.join(tdir, name)
+                names = set()
+                for name in os.listdir(base):
+                    full = os.path.join(base, name)
+                    if name.endswith(".json") and os.path.isfile(full):
+                        names.add(name[:-5])
+                    elif os.path.isdir(full) and name != "archive" and not name.startswith("."):
+                        names.add(name)
+                found.extend((scope, name, archived) for name in sorted(names))
+        return found
+
+    def read_group(self, scope, rtype, archived=False, errors=None):
+        """All records of one type in one scope, as {lowercase id: record}."""
+        records = {}
+
+        def note(path, text):
+            if errors is not None:
+                errors.append("%s: %s" % (os.path.relpath(path, self.root).replace(os.sep, "/"), text))
+
+        def take(rec, path):
+            if not isinstance(rec, dict) or not rec.get("id"):
+                note(path, "a record is not an object with an id")
+                return
+            key = str(rec["id"]).lower()
+            old = records.get(key)
+            if old is not None and (old.get("updated_at") or "") > (rec.get("updated_at") or ""):
+                return
+            records[key] = rec
+
+        path = self.type_path(scope, rtype, archived)
+        if os.path.isfile(path):
+            try:
+                data = read_json(path)
+                items = data.get("records") if isinstance(data, dict) else data
+                if not isinstance(items, list):
+                    raise ValueError("no \"records\" list")
+                seen = set()
+                for rec in items:
+                    if isinstance(rec, dict) and str(rec.get("id", "")).lower() in seen:
+                        note(path, "id %s appears twice" % rec.get("id"))
+                    seen.add(str(rec.get("id", "")).lower() if isinstance(rec, dict) else None)
+                    take(rec, path)
+            except (ValueError, OSError) as exc:
+                note(path, "unreadable (%s)" % exc)
+        folder = self.legacy_dir(scope, rtype, archived)
+        if os.path.isdir(folder):
+            for name in sorted(os.listdir(folder)):
+                if name.endswith(".json"):
+                    try:
+                        take(read_json(os.path.join(folder, name)), os.path.join(folder, name))
+                    except (ValueError, OSError) as exc:
+                        note(os.path.join(folder, name), "unreadable (%s)" % exc)
+        return records
+
+    def write_group(self, scope, rtype, archived, records):
+        """Write one type file (one record per line, sorted by id) and drop the legacy folder."""
+        path = self.type_path(scope, rtype, archived)
+        rows = [json.dumps({k: v for k, v in r.items() if not k.startswith("_")}, ensure_ascii=False)
+                for _, r in sorted(records.items())]
+        if rows:
+            write_text_atomic(path, '{"type": %s, "records": [\n%s\n]}\n' % (json.dumps(rtype), ",\n".join(rows)))
+        elif os.path.isfile(path):
+            os.remove(path)
+        folder = self.legacy_dir(scope, rtype, archived)
+        if os.path.isdir(folder):
+            for name in os.listdir(folder):
+                if name.endswith(".json"):
+                    os.remove(os.path.join(folder, name))
+            try:
+                os.rmdir(folder)
+            except OSError:
+                pass
+
+    def migrate(self):
+        """Fold folders of one-file-per-record (pre 0.3) into one file per type."""
+        moved = 0
+        for scope, rtype, archived in self.groups():
+            if os.path.isdir(self.legacy_dir(scope, rtype, archived)):
+                records = self.read_group(scope, rtype, archived)
+                self.write_group(scope, rtype, archived, records)
+                moved += len(records)
+        return moved
+
+    def iter_records(self, errors=None):
+        for scope, rtype, archived in self.groups():
+            for rec in self.read_group(scope, rtype, archived, errors).values():
+                yield scope, rtype, archived, rec
+
+    def taken_ids(self):
+        return {str(rec["id"]).lower() for _, _, _, rec in self.iter_records()}
 
     def all_records(self, errors=None):
         records = []
-        for scope, rtype, archived, path in self.iter_files():
-            try:
-                rec = read_json(path)
-            except (ValueError, OSError) as exc:
-                if errors is not None:
-                    errors.append("%s: unreadable (%s)" % (os.path.relpath(path, self.root), exc))
-                continue
-            if not isinstance(rec, dict):
-                if errors is not None:
-                    errors.append("%s: not a JSON object" % os.path.relpath(path, self.root))
-                continue
+        for scope, rtype, archived, rec in self.iter_records(errors):
             rec["_scope"] = scope
             rec["_type"] = rtype
             rec["_archived"] = archived
-            rec["_path"] = os.path.relpath(path, self.root).replace(os.sep, "/")
+            rec["_path"] = os.path.relpath(self.type_path(scope, rtype, archived), self.root).replace(os.sep, "/")
             records.append(rec)
         return records
 
     def find(self, rid):
-        rid = rid.strip()
-        for scope, rtype, archived, path in self.iter_files():
-            if os.path.basename(path)[:-5].lower() == rid.lower():
-                return scope, rtype, archived, path
+        rid = rid.strip().lower()
+        for scope, rtype, archived, rec in self.iter_records():
+            if str(rec["id"]).lower() == rid:
+                return scope, rtype, archived, rec
         raise StateError("no record with id %s" % rid)
 
     def load(self, rid):
-        scope, rtype, archived, path = self.find(rid)
-        return read_json(path), scope, rtype, archived, path
+        scope, rtype, archived, rec = self.find(rid)
+        return rec, scope, rtype, archived, self.type_path(scope, rtype, archived)
+
+    def remove(self, rid, scope, rtype, archived=False):
+        records = self.read_group(scope, rtype, archived)
+        records.pop(str(rid).lower(), None)
+        self.write_group(scope, rtype, archived, records)
 
     def new_id(self, prefix, spec=None):
-        taken = {os.path.basename(p)[:-5].lower() for _, _, _, p in self.iter_files()}
+        taken = self.taken_ids()
         if (spec or {}).get("ids") == "sequential":
             width = int(spec.get("id_width") or 3)
             pattern = re.compile(r"^%s-?0*(\d+)$" % re.escape(prefix.lower()))
@@ -390,8 +477,9 @@ class Store:
         raise StateError("could not find a free id")
 
     def save(self, rec, scope, rtype, archived=False):
-        clean = {k: v for k, v in rec.items() if not k.startswith("_")}
-        write_json_atomic(self.record_path(scope, rtype, clean["id"], archived), clean)
+        records = self.read_group(scope, rtype, archived)
+        records[str(rec["id"]).lower()] = rec
+        self.write_group(scope, rtype, archived, records)
 
     # ---- validation of a record against its type
     def check_record(self, rec, rtype, spec, ids=None):
@@ -578,7 +666,7 @@ def apply_simple_flags(rec, args, clearing):
 
 def check_links(store, rec):
     """Refuse links to records that do not exist."""
-    ids = {os.path.basename(p)[:-5].lower() for _, _, _, p in store.iter_files()}
+    ids = store.taken_ids()
     refs = [(k, rec.get(k)) for k in ("goal", "parent", "task", "testcase", "bug")]
     refs += [("depends_on", d) for d in rec.get("depends_on") or []]
     for key, ref in refs:
@@ -678,6 +766,8 @@ def cmd_init(store, args):
         cfg["project"]["name"] = args.name or os.path.basename(store.root)
         write_json_atomic(os.path.join(store.dir, "config.json"), cfg)
     write_text_atomic(os.path.join(store.dir, ".gitignore"), GITIGNORE)
+    write_text_atomic(os.path.join(store.dir, ".gitattributes"), GITATTRIBUTES)
+    migrated = store.migrate()
 
     copied = []
     me = os.path.abspath(__file__)
@@ -710,6 +800,8 @@ def cmd_init(store, args):
     if copied:
         lines.append("copied: " + ", ".join(copied))
     lines.extend(notes)
+    if migrated:
+        lines.append("converted %d records to one file per type" % migrated)
     if found:
         lines.append("markdown files that can be imported: " + ", ".join(found))
         lines.append("preview with: python3 %s/repostate.py import %s --dry-run" % (STATE_DIR, " ".join(found)))
@@ -749,6 +841,8 @@ def install_hooks(store):
     if not os.path.isabs(hooks_dir):
         hooks_dir = os.path.join(store.root, hooks_dir)
     os.makedirs(hooks_dir, exist_ok=True)
+    git(["config", "merge.repostate.name", "repostate record merge"], store.root)
+    git(["config", "merge.repostate.driver", MERGE_DRIVER], store.root)
     done = []
     for name in ("post-merge", "post-checkout", "post-rewrite"):
         path = os.path.join(hooks_dir, name)
@@ -949,7 +1043,7 @@ def cmd_list(store, args):
 def cmd_show(store, args):
     store.require()
     rec, scope, rtype, archived, path = store.load(args.id)
-    rec["_scope"], rec["_type"], rec["_path"] = scope, rtype, os.path.relpath(path, store.root)
+    rec["_scope"], rec["_type"], rec["_path"] = scope, rtype, os.path.relpath(path, store.root).replace(os.sep, "/")
     print(json.dumps(rec, indent=2, ensure_ascii=False))
 
 
@@ -961,7 +1055,7 @@ def move_record(store, args, to_scope):
             raise StateError("%s is already %s" % (rec["id"], to_scope))
         rec["updated_at"] = now_iso()
         store.save(rec, to_scope, rtype, archived)
-        os.remove(path)
+        store.remove(rec["id"], scope, rtype, archived)
     where = "it will be shared with your next commit" if to_scope == "team" else "it is now private to this machine"
     finish(store, args, rec, "%s moved to %s: %s" % (rec["id"], to_scope, where))
 
@@ -978,7 +1072,7 @@ def cmd_delete(store, args):
     store.require()
     with store.lock():
         rec, scope, rtype, archived, path = store.load(args.id)
-        os.remove(path)
+        store.remove(rec["id"], scope, rtype, archived)
     finish(store, args, {"deleted": rec["id"]}, "%s deleted" % rec["id"])
 
 
@@ -1107,10 +1201,9 @@ def cmd_archive(store, args):
                 ["git", "merge-base", "--is-ancestor", branch, default], cwd=store.root,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
             if (not exists) or merged:
-                path = os.path.join(store.root, rec["_path"])
                 if not args.dry_run:
                     store.save(rec, rec["_scope"], "reviews", archived=True)
-                    os.remove(path)
+                    store.remove(rec["id"], rec["_scope"], "reviews", False)
                 moved.append("%s (%s %s)" % (rec["id"], branch, "deleted" if not exists else "merged"))
     verb = "would archive" if args.dry_run else "archived"
     finish(store, args, {"archived": moved}, ("%s: %s" % (verb, ", ".join(moved))) if moved else "nothing to archive")
@@ -1133,9 +1226,6 @@ def cmd_validate(store, args):
     seen = {}
     for rec in records:
         rid = str(rec.get("id", "")).lower()
-        name = os.path.basename(rec["_path"])[:-5].lower()
-        if rid != name:
-            errors.append("%s: id %r does not match its file name" % (rec["_path"], rec.get("id")))
         if rid in seen:
             errors.append("%s: id also used by %s" % (rec["_path"], seen[rid]))
         seen[rid] = rec["_path"]
@@ -1172,6 +1262,59 @@ def cmd_validate(store, args):
         sys.exit(1)
 
 
+def records_at(store, ref):
+    """Team records as they were at a git ref, {id: record}. Reads both file layouts."""
+    found = {}
+    names = git(["ls-tree", "-r", "--name-only", ref, "--", "%s/team" % STATE_DIR], store.root)
+    for name in names.splitlines():
+        parts = name.split("/")[2:]
+        if not name.endswith(".json") or not parts or parts[0] == "archive" or len(parts) > 2:
+            continue
+        try:
+            data = json.loads(git(["show", "%s:%s" % (ref, name)], store.root))
+        except ValueError:
+            continue
+        items = data.get("records", []) if len(parts) == 1 and isinstance(data, dict) else [data]
+        for rec in items:
+            if isinstance(rec, dict) and rec.get("id"):
+                found[rec["id"]] = rec
+    return found
+
+
+def parse_state_file(path):
+    try:
+        data = read_json(path)
+    except (ValueError, OSError):
+        return None, {}
+    if not isinstance(data, dict) or not isinstance(data.get("records"), list):
+        return None, {}
+    return data.get("type"), {str(r["id"]).lower(): r for r in data["records"] if isinstance(r, dict) and r.get("id")}
+
+
+def cmd_merge_file(store, args):
+    """Git merge driver: three-way merge of a type file, record by record."""
+    _, base = parse_state_file(args.base)
+    rtype, ours = parse_state_file(args.ours)
+    rtype2, theirs = parse_state_file(args.theirs)
+    if rtype is None or rtype2 is None:
+        sys.exit(1)
+    merged = {}
+    for key in set(base) | set(ours) | set(theirs):
+        o, a, b = base.get(key), ours.get(key), theirs.get(key)
+        if a == b or b == o:
+            pick = a
+        elif a == o:
+            pick = b
+        elif a is None or b is None:
+            pick = a or b
+        else:
+            pick = a if (a.get("updated_at") or "") >= (b.get("updated_at") or "") else b
+        if pick is not None:
+            merged[key] = pick
+    rows = [json.dumps(r, ensure_ascii=False) for _, r in sorted(merged.items())]
+    write_text_atomic(args.ours, '{"type": %s, "records": [\n%s\n]}\n' % (json.dumps(rtype), ",\n".join(rows)))
+
+
 def cmd_summary(store, args):
     """Markdown summary of team data, for pull request comments."""
     store.require()
@@ -1200,16 +1343,15 @@ def cmd_summary(store, args):
             lines.append("**%s:** " % name + " · ".join(
                 "%s %d" % (str(st).replace("_", " "), counts[st]) for st in types[rtype]["statuses"] if counts.get(st)))
     if args.since:
-        changed = git(["diff", "--name-status", "%s...HEAD" % args.since, "--", "%s/team" % STATE_DIR], store.root)
+        before = records_at(store, git(["merge-base", args.since, "HEAD"], store.root) or args.since)
         rows = []
-        for line in changed.splitlines():
-            parts = line.split("\t")
-            if len(parts) < 2 or not parts[-1].endswith(".json"):
+        for rid in sorted(set(before) | set(by_id)):
+            old, rec = before.get(rid), by_id.get(rid)
+            new = {k: v for k, v in rec.items() if not k.startswith("_")} if rec else None
+            if old == new:
                 continue
-            rid = os.path.basename(parts[-1])[:-5]
-            rec = by_id.get(rid)
-            label = (rec.get("title") or rec.get("summary")) if rec else "(removed)"
-            what = {"A": "added", "M": "updated", "D": "removed"}.get(parts[0][:1], "changed")
+            label = (rec or old).get("title") or (rec or old).get("summary")
+            what = "added" if old is None else ("removed" if rec is None else "updated")
             status = (" → %s" % rec.get("status")) if rec and rec.get("status") else ""
             rows.append("| %s | %s | %s%s |" % (rid, label, what, status))
         lines += ["", "### Changed in this branch", ""]
@@ -2157,7 +2299,11 @@ def build_parser():
     sp = cmd("open", cmd_open, "build and open the dashboard in a browser")
     sp.add_argument("--print-only", action="store_true", help="print the file URL without opening it")
     cmd("types", cmd_types, "list record types and their statuses")
-    cmd("hooks", cmd_hooks, "install git hooks that rebuild the dashboard")
+    cmd("hooks", cmd_hooks, "install git hooks (rebuild the dashboard after pulls) and the record merge driver")
+    sp = cmd("merge-file", cmd_merge_file, "git merge driver for type files (used by git, not by hand)")
+    sp.add_argument("base")
+    sp.add_argument("ours")
+    sp.add_argument("theirs")
     return p
 
 

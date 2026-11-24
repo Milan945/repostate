@@ -58,6 +58,16 @@ class RepoCase(unittest.TestCase):
     def path(self, *parts):
         return os.path.join(self.dir, ".repostate", *parts)
 
+    def group(self, scope, rtype, archived=False):
+        path = self.path(scope, *((["archive"] if archived else []) + [rtype + ".json"]))
+        if not os.path.exists(path):
+            return {}
+        with open(path, encoding="utf-8") as fh:
+            return {r["id"]: r for r in json.load(fh)["records"]}
+
+    def stored(self, scope, rtype, rid, archived=False):
+        return rid in self.group(scope, rtype, archived)
+
     def data(self):
         with open(self.path("data.js"), encoding="utf-8") as fh:
             text = fh.read()
@@ -80,7 +90,7 @@ class TestInit(RepoCase):
         self.run_ok("add", "tasks", "--title", "shared")
         status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=self.dir,
                                 stdout=subprocess.PIPE, universal_newlines=True).stdout
-        self.assertIn(".repostate/team/tasks/", status)
+        self.assertIn(".repostate/team/tasks.json", status)
         self.assertNotIn("personal", status)
         self.assertNotIn("data.js", status)
 
@@ -147,12 +157,12 @@ class TestRecords(RepoCase):
 
     def test_promote_and_unshare(self):
         n = self.run_json("add", "notes", "--title", "idea")
-        self.assertTrue(os.path.exists(self.path("personal", "notes", n["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "notes", n["id"]))
         self.run_ok("promote", n["id"])
-        self.assertTrue(os.path.exists(self.path("team", "notes", n["id"] + ".json")))
-        self.assertFalse(os.path.exists(self.path("personal", "notes", n["id"] + ".json")))
+        self.assertTrue(self.stored("team", "notes", n["id"]))
+        self.assertFalse(self.stored("personal", "notes", n["id"]))
         self.run_ok("unshare", n["id"])
-        self.assertTrue(os.path.exists(self.path("personal", "notes", n["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "notes", n["id"]))
 
     def test_list_filters(self):
         self.run_ok("add", "tasks", "--title", "open one")
@@ -179,20 +189,19 @@ class TestValidate(RepoCase):
 
     def test_detects_problems(self):
         t = self.run_json("add", "tasks", "--title", "x")
-        path = self.path("team", "tasks", t["id"] + ".json")
+        path = self.path("team", "tasks.json")
         with open(path) as fh:
-            rec = json.load(fh)
-        rec["status"] = "weird"
-        rec["goal"] = "G-missing"
+            data = json.load(fh)
+        data["records"][0]["status"] = "weird"
+        data["records"][0]["goal"] = "G-missing"
+        data["records"].append(dict(data["records"][0]))
         with open(path, "w") as fh:
-            json.dump(rec, fh)
-        with open(self.path("team", "tasks", "T-copy.json"), "w") as fh:
-            json.dump(dict(rec, id="T-other"), fh)
-        with open(self.path("team", "tasks", "T-broken.json"), "w") as fh:
+            json.dump(data, fh)
+        with open(self.path("team", "goals.json"), "w") as fh:
             fh.write("{not json")
         out = self.run_cli("validate")
         self.assertEqual(out.returncode, 1)
-        for text in ("weird", "G-missing", "does not match its file name", "unreadable"):
+        for text in ("weird", "G-missing", "appears twice", "unreadable"):
             self.assertIn(text, out.stdout)
 
     def test_team_depending_on_personal(self):
@@ -233,7 +242,7 @@ class TestConfig(RepoCase):
         with open(self.path("config.local.json"), "w") as fh:
             json.dump({"types": {"tasks": {"scope": "personal"}}}, fh)
         t = self.run_json("add", "tasks", "--title", "x")
-        self.assertTrue(os.path.exists(self.path("personal", "tasks", t["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "tasks", t["id"]))
 
 
 class TestImport(RepoCase):
@@ -262,7 +271,7 @@ class TestImport(RepoCase):
         self.write("tasks.md", self.TASKS)
         preview = self.run_json("import", "tasks.md", "--dry-run")
         self.assertEqual(preview["created"], [])
-        self.assertFalse(os.path.isdir(self.path("team", "tasks")) and os.listdir(self.path("team", "tasks")))
+        self.assertFalse(os.path.exists(self.path("team", "tasks.json")))
         self.run_ok("import", "tasks.md")
         tasks = {t["title"]: t for t in self.run_json("list", "tasks")}
         self.assertEqual(len(tasks), 9)
@@ -357,7 +366,7 @@ class TestReviews(RepoCase):
         scope = review["scope"]
         self.assertEqual((scope["type"], scope["branch"], scope["base"], scope["files_changed"]),
                          ("branch", "feat/x", "main", 1))
-        self.assertTrue(os.path.exists(self.path("personal", "reviews", review["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "reviews", review["id"]))
         self.assertEqual([f["id"] for f in review["findings"]], ["F1", "F2"])
         f3 = self.run_json("review", "finding", review["id"], "--severity", "note", "--title", "later")
         self.assertEqual(f3["id"], "F3")
@@ -373,7 +382,7 @@ class TestReviews(RepoCase):
         self.assertEqual(self.run_cli("review", "new", "--scope", "commits").returncode, 1)
         self.assertEqual(self.run_json("review", "new", "--scope", "commits", "--range", "a..b")["scope"]["range"], "a..b")
         shared = self.run_json("review", "new", "--scope", "working", "--team")
-        self.assertTrue(os.path.exists(self.path("team", "reviews", shared["id"] + ".json")))
+        self.assertTrue(self.stored("team", "reviews", shared["id"]))
 
     def test_archive_merged_branch(self):
         self.make_branch()
@@ -381,9 +390,9 @@ class TestReviews(RepoCase):
         git(self.dir, "checkout", "-q", "main")
         git(self.dir, "merge", "-q", "--no-ff", "-m", "merge", "feat/x")
         self.assertIn(review["id"], self.run_ok("archive", "--dry-run"))
-        self.assertTrue(os.path.exists(self.path("personal", "reviews", review["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "reviews", review["id"]))
         self.run_ok("archive", "--into", "main")
-        self.assertTrue(os.path.exists(self.path("personal", "archive", "reviews", review["id"] + ".json")))
+        self.assertTrue(self.stored("personal", "reviews", review["id"], archived=True))
         self.assertEqual(self.run_json("list", "reviews"), [])
         self.assertEqual(len(self.run_json("list", "reviews", "--archived")), 1)
 
@@ -429,7 +438,7 @@ class TestIdsAndTaskFields(RepoCase):
     def test_custom_ids(self):
         t = self.run_json("add", "tasks", "--id", "T001", "--title", "first")
         self.assertEqual(t["id"], "T001")
-        self.assertTrue(os.path.exists(self.path("team", "tasks", "T001.json")))
+        self.assertTrue(self.stored("team", "tasks", "T001"))
         self.assertEqual(self.run_cli("add", "tasks", "--id", "t001", "--title", "again").returncode, 1)
         self.assertEqual(self.run_cli("add", "tasks", "--id", "../x", "--title", "bad").returncode, 1)
         self.assertEqual(self.run_json("show", "t001")["title"], "first")
@@ -659,6 +668,81 @@ class TestTableImport(RepoCase):
         self.run_ok("import", "tasks.md")
         tasks = {t["title"]: t for t in self.run_json("list", "tasks")}
         self.assertEqual(tasks["Child"]["parent"], tasks["Parent"]["id"])
+
+
+
+class TestOneFilePerType(RepoCase):
+    def test_layout_is_one_line_per_record(self):
+        for i in range(3):
+            self.run_ok("add", "tasks", "--title", "t%d" % i)
+        self.run_ok("add", "testcases", "--title", "c")
+        self.assertEqual(sorted(n for n in os.listdir(self.path("team")) if n.endswith(".json")),
+                         ["tasks.json", "testcases.json"])
+        with open(self.path("team", "tasks.json"), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[0], '{"type": "tasks", "records": [')
+        ids = list(self.group("team", "tasks"))
+        self.assertEqual(ids, sorted(ids, key=str.lower))
+
+    def test_last_record_removed_drops_the_file(self):
+        t = self.run_json("add", "tasks", "--title", "only")
+        self.run_ok("delete", t["id"])
+        self.assertFalse(os.path.exists(self.path("team", "tasks.json")))
+
+    def test_old_folders_are_read_and_converted(self):
+        os.makedirs(self.path("team", "tasks"))
+        os.makedirs(self.path("personal", "archive", "reviews"))
+        old = {"id": "T-old1", "title": "from 0.2", "status": "todo", "created_at": "2026-11-01T00:00:00Z"}
+        with open(self.path("team", "tasks", "T-old1.json"), "w") as fh:
+            json.dump(old, fh)
+        with open(self.path("team", "tasks", "T-old2.json"), "w") as fh:
+            json.dump(dict(old, id="T-old2"), fh)
+        with open(self.path("personal", "archive", "reviews", "R-old.json"), "w") as fh:
+            json.dump({"id": "R-old", "title": "r", "status": "closed", "findings": []}, fh)
+        self.assertEqual(len(self.run_json("list", "tasks")), 2)
+        self.assertEqual(self.run_json("done", "T-old1")["status"], "done")
+        self.assertFalse(os.path.exists(self.path("team", "tasks")))
+        self.assertEqual(set(self.group("team", "tasks")), {"T-old1", "T-old2"})
+        self.assertIn("converted 1 records", self.run_ok("init"))
+        self.assertFalse(os.path.exists(self.path("personal", "archive", "reviews")))
+        self.assertTrue(self.stored("personal", "reviews", "R-old", archived=True))
+        self.assertIn("no problems", self.run_ok("validate"))
+
+    def test_summary_since_across_the_layout_change(self):
+        os.makedirs(self.path("team", "tasks"))
+        with open(self.path("team", "tasks", "T-old1.json"), "w") as fh:
+            json.dump({"id": "T-old1", "title": "kept", "status": "todo"}, fh)
+        git(self.dir, "add", "-A")
+        git(self.dir, "commit", "-qm", "old layout")
+        git(self.dir, "checkout", "-q", "-b", "feat/z")
+        self.run_ok("init")
+        self.run_ok("add", "tasks", "--id", "T-new", "--title", "fresh")
+        git(self.dir, "add", "-A")
+        git(self.dir, "commit", "-qm", "new layout")
+        out = self.run_ok("summary", "--since", "main")
+        self.assertIn("| T-new | fresh | added", out)
+        self.assertNotIn("T-old1", out)
+
+    def test_branches_merge_record_by_record(self):
+        self.run_ok("hooks")
+        self.run_ok("add", "tasks", "--id", "T001", "--title", "one")
+        self.run_ok("add", "tasks", "--id", "T002", "--title", "two")
+        git(self.dir, "add", "-A")
+        git(self.dir, "commit", "-qm", "base")
+        git(self.dir, "checkout", "-q", "-b", "feat/a")
+        self.run_ok("add", "tasks", "--id", "T003", "--title", "three")
+        self.run_ok("done", "T001")
+        git(self.dir, "commit", "-qam", "a")
+        git(self.dir, "checkout", "-q", "main")
+        self.run_ok("add", "tasks", "--id", "T004", "--title", "four")
+        self.run_ok("start", "T002")
+        git(self.dir, "commit", "-qam", "b")
+        git(self.dir, "merge", "-q", "-m", "merge", "feat/a")
+        tasks = self.group("team", "tasks")
+        self.assertEqual({k: v["status"] for k, v in tasks.items()},
+                         {"T001": "done", "T002": "doing", "T003": "todo", "T004": "todo"})
+        self.assertIn("no problems", self.run_ok("validate"))
 
 
 if __name__ == "__main__":

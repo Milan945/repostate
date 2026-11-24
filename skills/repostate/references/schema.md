@@ -1,6 +1,6 @@
 # Record shapes
 
-Every record is a JSON object in `.repostate/<scope>/<type>/<id>.json`. The CLI sets `id`, `author`, `created_at` and `updated_at`; everything else comes from flags, `--set key=value` or `--data '<json>'`. Unknown fields are kept and shown in the dashboard, so teams can add their own.
+Each type has one file, `.repostate/<scope>/<type>.json`, shaped `{"type": "tasks", "records": [ … ]}` with one record per line, sorted by id. Archived reviews are in `.repostate/<scope>/archive/reviews.json`. Every record is a JSON object. The CLI sets `id`, `author`, `created_at` and `updated_at`; everything else comes from flags, `--set key=value` or `--data '<json>'`. Unknown fields are kept and shown in the dashboard, so teams can add their own.
 
 Common fields on any type:
 

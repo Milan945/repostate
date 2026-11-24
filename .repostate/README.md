@@ -10,7 +10,7 @@ python3 .repostate/repostate.py open      # builds the data and opens the dashbo
 
 Or run `python3 .repostate/repostate.py build`, then open `.repostate/index.html` in a browser. No server and no install are needed. Python 3.8 or newer is the only requirement.
 
-To have the dashboard rebuild itself after every `git pull`, checkout or merge, run this once per clone:
+Run this once per clone. It rebuilds the dashboard after every `git pull`, checkout or merge, and makes git merge the JSON files record by record, so two people adding tasks on different branches don't get a conflict:
 
 ```bash
 python3 .repostate/repostate.py hooks
@@ -20,8 +20,8 @@ python3 .repostate/repostate.py hooks
 
 | Folder | In git? | Who sees it |
 |---|---|---|
-| `team/` | Committed | Everyone with access to this repo |
-| `personal/` | Gitignored | Only you, on this machine |
+| `team/<type>.json` | Committed | Everyone with access to this repo |
+| `personal/<type>.json` | Gitignored | Only you, on this machine |
 | `config.json` | Committed | Team settings: statuses, custom fields, custom types |
 | `config.local.json` | Gitignored | Your own overrides |
 | `data.js` | Gitignored | Generated for the dashboard |

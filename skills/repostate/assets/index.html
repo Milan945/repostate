@@ -1065,13 +1065,16 @@ function loadFolder(files){
   var jobs = [], cfg = {}, local = {}, records = [];
   Array.prototype.forEach.call(files, function(f){
     var p = (f.webkitRelativePath || f.name).replace(/\\/g, "/");
-    var m = p.match(/(?:^|\/)(team|personal)\/(archive\/)?([^/]+)\/([^/]+)\.json$/);
+    var g = p.match(/(?:^|\/)(team|personal)\/(archive\/)?([^/]+)\.json$/);
+    var m = g || p.match(/(?:^|\/)(team|personal)\/(archive\/)?([^/]+)\/([^/]+)\.json$/);
     var isCfg = /(?:^|\/)config\.json$/.test(p) && !m, isLocal = /config\.local\.json$/.test(p);
     if (!m && !isCfg && !isLocal) return;
     jobs.push(f.text().then(function(text){
       var obj; try{ obj = JSON.parse(text); }catch(e){ return; }
       if (isLocal) local = obj; else if (isCfg) cfg = obj;
-      else if (obj && typeof obj === "object"){ obj._scope = m[1]; obj._archived = !!m[2]; obj._type = m[3]; obj._path = ".repostate/" + p.split("/").slice(1).join("/"); records.push(obj); }
+      else (g ? (obj && obj.records) || [] : [obj]).forEach(function(rec){
+        if (rec && typeof rec === "object"){ rec._scope = m[1]; rec._archived = !!m[2]; rec._type = m[3]; rec._path = ".repostate/" + m[1] + "/" + (m[2] || "") + m[3] + ".json"; records.push(rec); }
+      });
     }));
   });
   Promise.all(jobs).then(function(){

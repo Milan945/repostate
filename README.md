@@ -12,7 +12,7 @@ repostate is an [Agent Skill](https://agentskills.io) for coding agents (Claude 
 
 - **Markdown plans drift.** Agents rewrite whole files, lose items, and break formatting. Here every change is one small, validated write.
 - **You can see the state at a glance.** Board, slices, dependency graph, estimate against actual hours, test matrix, bugs, requirement traceability, screenshots, review findings and decisions.
-- **It works for a team.** One file per record and random ids mean two people on two branches don't get merge conflicts.
+- **It works for a team.** One JSON file per type, one record per line, random ids, and a merge helper that combines two branches record by record.
 - **Nothing to host.** No server, no database, no account. Python 3.8+ and a browser.
 - **No lock-in.** It's plain JSON in your repo, and `export` writes it back out as markdown.
 
@@ -83,8 +83,10 @@ Run `python3 .repostate/repostate.py --help` for every command.
 
 ```
 .repostate/
-  team/<type>/<id>.json        committed: everyone with the repo sees it
-  personal/<type>/<id>.json    gitignored: only you, on this machine
+  team/tasks.json              one file per type, one record per line
+  team/testcases.json          committed: everyone with the repo sees it
+  team/bugs.json  …
+  personal/<type>.json         gitignored: only you, on this machine
   config.json                  team settings (statuses, fields, custom types)
   config.local.json            your own overrides (gitignored)
   index.html                   the dashboard
@@ -149,7 +151,7 @@ Pages appear only when there is data for them, so a small repo that only tracks 
 - The dashboard has an **All / Team / Personal** switch, and personal items carry a "Private" badge.
 - Access to team data is exactly access to the repo. A private repo keeps its data private.
 
-**For teammates:** after cloning, run `python3 .repostate/repostate.py build` once, or `hooks` to rebuild automatically after every pull, then open `.repostate/index.html`. The page also has a "Choose the .repostate folder" button that works without any build step.
+**For teammates:** after cloning, run `python3 .repostate/repostate.py hooks` once, then open `.repostate/index.html`. `hooks` rebuilds the dashboard after every pull and makes git merge the JSON files record by record. Without it, two branches that both add records to the same file can hit an ordinary merge conflict. The page also has a "Choose the .repostate folder" button that works without any build step.
 
 **On pull requests:** `init --actions` adds a GitHub Action that posts one comment per pull request with task counts, goal progress, and the records the branch added or changed.
 
@@ -206,7 +208,7 @@ Edit `.repostate/config.json`:
 
 ## Design choices
 
-This repo tracks itself with repostate: see [`.repostate/team/decisions/`](.repostate/team/decisions/) for why it uses one file per record, JSON instead of SQLite, a team/personal split, and a generated `data.js`.
+This repo tracks itself with repostate: see [`.repostate/team/decisions.json`](.repostate/team/decisions.json) for why it uses one file per type, JSON instead of SQLite, a team/personal split, and a generated `data.js`.
 
 ## Contributing
 

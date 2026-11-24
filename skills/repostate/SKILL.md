@@ -5,12 +5,12 @@ description: Keep a repo's tasks, goals, progress log, open questions and notes 
 
 # repostate
 
-Project state lives in the repo as one JSON file per record:
+Project state lives in the repo as one JSON file per type (`tasks.json`, `testcases.json`, `bugs.json`, …), one record per line:
 
 ```
 .repostate/
-  team/<type>/<id>.json        committed: everyone with the repo sees it
-  personal/<type>/<id>.json    gitignored: only this machine
+  team/<type>.json             committed: everyone with the repo sees it
+  personal/<type>.json         gitignored: only this machine
   config.json                  team settings (statuses, custom fields, custom types)
   config.local.json            personal overrides, gitignored
   index.html                   the dashboard (static, no server)
@@ -32,7 +32,7 @@ If `.repostate/` does not exist, run the copy that ships with this skill, from t
 python3 <this skill's folder>/scripts/repostate.py init
 ```
 
-`init` creates the folder, copies the CLI and dashboard in, and lists any markdown files it can import. Add `--hooks` if the user wants the dashboard to rebuild after every pull, and `--actions` if they want a GitHub Action that posts a summary on each pull request. Running `init` again on an existing repo upgrades the CLI and dashboard and leaves the data alone.
+`init` creates the folder, copies the CLI and dashboard in, and lists any markdown files it can import. Add `--hooks` if the user wants the dashboard to rebuild after every pull (this also turns on record-by-record merging of the type files, which a team should have on every clone), and `--actions` if they want a GitHub Action that posts a summary on each pull request. Running `init` again on an existing repo upgrades the CLI and dashboard and keeps the data. Repos set up before 0.3 stored one file per record in folders (`team/tasks/T-1.json`); `init` converts those into one file per type.
 
 ## Importing existing markdown
 

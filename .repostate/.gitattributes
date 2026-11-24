@@ -1,0 +1,3 @@
+# repostate: merge type files record by record (enabled per clone by `repostate.py hooks`)
+team/*.json merge=repostate
+team/archive/*.json merge=repostate

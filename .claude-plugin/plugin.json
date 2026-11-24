@@ -1,6 +1,6 @@
 {
   "name": "repostate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Keep tasks, goals, progress, code reviews and architecture decisions as JSON in the repo, with a static HTML dashboard. Imports tasks.md; team data shared through git, personal data stays local.",
   "author": {
     "name": "Milan945",
