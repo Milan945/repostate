@@ -1,0 +1,38 @@
+# Publishes a GitHub release when a version tag (v1.2.3) is pushed.
+# The release notes are that version's section of CHANGELOG.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the plugin version
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match plugin.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" > notes.md <<'PY'
+          import re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## %s\b.*?\n(.*?)(?=^## |\Z)" % re.escape(sys.argv[1]), text, re.S | re.M)
+          print((m.group(1).strip() if m else "See CHANGELOG.md.") + "\n\n**Install or update:** see the [README](https://github.com/Milan945/repostate#install).")
+          PY
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "repostate $GITHUB_REF_NAME" --notes-file notes.md --verify-tag

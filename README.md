@@ -1,16 +1,24 @@
 # repostate
 
-**Your project's tasks, goals, progress, test cases, bugs, code reviews and decisions, kept as JSON inside the repo, with a dashboard that opens from disk.**
+[![ci](https://github.com/Milan945/repostate/actions/workflows/ci.yml/badge.svg)](https://github.com/Milan945/repostate/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Milan945/repostate)](https://github.com/Milan945/repostate/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![stars](https://img.shields.io/github/stars/Milan945/repostate?style=social)](https://github.com/Milan945/repostate/stargazers)
 
-repostate is an [Agent Skill](https://agentskills.io) for coding agents (Claude Code, Cursor, Codex and others). Instead of the agent rewriting `tasks.md` and `progress.md` by hand, it runs a small CLI that saves each item as a JSON file. A static HTML page shows everything. Team items are committed and shared through git. Personal items stay on your machine.
+**Your project's tasks, test cases, bugs, requirements and decisions, kept as JSON inside the repo, with a dashboard that opens from disk.**
 
-![Dashboard overview](docs/images/overview.png)
+repostate is an [Agent Skill](https://agentskills.io) for coding agents (Claude Code, Cursor, Codex and others). Instead of the agent rewriting `tasks.md` and `progress.md` by hand, it runs a small CLI that saves each item as JSON in your repo. A static HTML page shows everything: task board, slices, dependency graph, hours, test matrix, bugs, requirement traceability and screenshots. Team items are committed and shared through git. Personal items stay on your machine.
 
-<sub>Screenshots use example data.</sub>
+**[Open the live demo](https://milan945.github.io/repostate/)** · [Install](#install) · [What the dashboard shows](#what-the-dashboard-shows)
+
+![repostate dashboard walkthrough](docs/images/demo.gif)
+
+<sub>The demo uses the example project in [`examples/messaging-app`](examples/messaging-app): a hand-kept markdown hub file imported in one command. Build it yourself with `sh examples/messaging-app/build-demo.sh /tmp/demo`, then open `/tmp/demo/.repostate/index.html`.</sub>
 
 ## Why
 
 - **Markdown plans drift.** Agents rewrite whole files, lose items, and break formatting. Here every change is one small, validated write.
+- **QA lives next to the work.** Test cases, bugs and requirements link to tasks, so you can see what is tested, what failed and which requirements have no test.
 - **You can see the state at a glance.** Board, slices, dependency graph, estimate against actual hours, test matrix, bugs, requirement traceability, screenshots, review findings and decisions.
 - **It works for a team.** One JSON file per type, one record per line, random ids, and a merge helper that combines two branches record by record.
 - **Nothing to host.** No server, no database, no account. Python 3.8+ and a browser.

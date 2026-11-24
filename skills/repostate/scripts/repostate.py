@@ -22,7 +22,7 @@ import sys
 import time
 import webbrowser
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 STATE_DIR = ".repostate"
 SCOPES = ("team", "personal")
 ID_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"

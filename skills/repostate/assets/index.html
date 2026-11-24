@@ -87,7 +87,7 @@ tbody tr:hover{background:var(--panel2)}
 .empty{padding:40px 20px;text-align:center;color:var(--text3);background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius)}
 dialog{border:1px solid var(--line);border-radius:14px;padding:0;width:min(760px,94vw);max-height:88vh;background:var(--panel);color:var(--text)}
 dialog::backdrop{background:rgba(10,12,16,.45)}
-.dlg-head{position:sticky;top:0;background:var(--panel);padding:18px 20px 12px;border-bottom:1px solid var(--line2);display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
+.dlg-head{position:sticky;top:0;z-index:2;background:var(--panel);padding:18px 20px 12px;border-bottom:1px solid var(--line2);display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
 .dlg-body{padding:16px 20px 22px;display:flex;flex-direction:column;gap:16px}
 .kv{display:grid;grid-template-columns:140px 1fr;gap:6px 14px;font-size:13px}
 .kv dt{color:var(--text3)}
@@ -438,12 +438,12 @@ views.overview = function(){
     var severe = openBugs.filter(function(b){ return b.severity === "critical" || b.severity === "high"; }).length;
     tiles.push(tile("Open bugs", openBugs.length + (severe ? ' <small style="color:var(--bad)">' + severe + " high or critical</small>" : "")));
   }
-  if (est != null) tiles.push(tile("Hours", hrs(act || 0) + " <small>of " + hrs(est) + " est</small>"));
+  if (est != null) tiles.push(tile("Hours of estimate", hrs(act || 0) + ' <small style="white-space:nowrap">of ' + hrs(est) + "</small>"));
   if (reviews.length || !tests.length) tiles.push(tile("Open review findings", findings.length + (blocking.length ? ' <small style="color:var(--bad)">' + blocking.length + " blocking</small>" : "")));
   if (recs("decisions").length || !tests.length) tiles.push(tile("Decisions to make", proposed.length));
-  var h = '<div class="grid fit" style="--min:180px">' + tiles.join("") + "</div>";
+  var h = '<div class="grid fit" style="--min:' + (tiles.length > 5 ? 150 : 180) + 'px">' + tiles.join("") + "</div>";
   h += '<div class="grid fit" style="--min:340px">';
-  h += '<section class="panel"><h3>Goals <a class="small" href="#/goals">All goals</a></h3>' +
+  if (recs("goals").length) h += '<section class="panel"><h3>Goals <a class="small" href="#/goals">All goals</a></h3>' +
     (goals.length ? goals.map(goalRow).join("") : '<p class="muted small">No active goals.</p>') + "</section>";
   h += '<section class="panel"><h3>Recent progress <a class="small" href="#/progress">Full log</a></h3>' +
     (progress.length ? progress.map(function(p){

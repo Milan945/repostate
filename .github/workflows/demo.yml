@@ -1,14 +1,12 @@
-# Publishes this repo's own dashboard (.repostate/) as a live demo on GitHub Pages.
+# Publishes the live demo on GitHub Pages:
+#   /       the example project in examples/messaging-app (tasks, tests, bugs, traceability, screenshots)
+#   /self/  this repo's own roadmap and design decisions (.repostate/)
 # One-time setup: Settings > Pages > Source: GitHub Actions.
-# Only team records are committed, so only team records are published.
-name: demo dashboard
+name: demo
 
 on:
   push:
     branches: [main]
-    paths:
-      - ".repostate/**"
-      - "skills/repostate/assets/index.html"
   workflow_dispatch:
 
 permissions:
@@ -28,13 +26,26 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Build the dashboard
+
+      - name: Build the example dashboard
+        run: sh examples/messaging-app/build-demo.sh "$RUNNER_TEMP/demo"
+
+      - name: Build this repo's own dashboard
+        run: python3 .repostate/repostate.py build --quiet
+
+      - name: Assemble the site
         run: |
-          python3 .repostate/repostate.py build
-          mkdir -p site
-          cp .repostate/index.html .repostate/data.js site/
+          mkdir -p site/app site/self
+          cp "$RUNNER_TEMP/demo/.repostate/index.html" "$RUNNER_TEMP/demo/.repostate/data.js" site/app/
+          cp -R "$RUNNER_TEMP/demo/screenshots" site/screenshots
+          cp .repostate/index.html .repostate/data.js site/self/
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8"><title>repostate demo</title>
+          <meta http-equiv="refresh" content="0; url=app/">
+          </head><body><p><a href="app/">Open the repostate demo dashboard</a></p></body></html>
+          HTML
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
