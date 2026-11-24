@@ -1,0 +1,47 @@
+# Added by `repostate.py init --actions`.
+# Posts (and keeps updating) one comment on each pull request with the
+# project state: task counts, goal progress, and the repostate records this
+# branch adds or changes. Only committed team data is used; personal data
+# never reaches git, so it never reaches this comment.
+name: repostate summary
+
+on:
+  pull_request:
+    paths:
+      - ".repostate/team/**"
+      - ".repostate/config.json"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the records
+        run: python3 .repostate/repostate.py validate
+
+      - name: Build the summary
+        run: |
+          python3 .repostate/repostate.py summary --since "origin/${{ github.base_ref }}" > repostate-summary.md
+          echo "" >> repostate-summary.md
+          echo "<!-- repostate-summary -->" >> repostate-summary.md
+
+      - name: Post or update the comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- repostate-summary -->")) | .id' | head -n 1)
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F body=@repostate-summary.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file repostate-summary.md
+          fi

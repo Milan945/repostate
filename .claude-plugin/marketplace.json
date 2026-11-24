@@ -1,0 +1,15 @@
+{
+  "name": "repostate",
+  "description": "repostate: project state as JSON inside your repo",
+  "owner": {
+    "name": "Milan945",
+    "url": "https://github.com/Milan945"
+  },
+  "plugins": [
+    {
+      "name": "repostate",
+      "source": "./",
+      "description": "Tasks, goals, progress, code reviews and architecture decisions as JSON in the repo, with a static HTML dashboard."
+    }
+  ]
+}

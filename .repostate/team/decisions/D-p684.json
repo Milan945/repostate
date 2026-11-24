@@ -1,0 +1,18 @@
+{
+  "id": "D-p684",
+  "status": "accepted",
+  "title": "Team data committed, personal data gitignored",
+  "context": "Teams need shared visibility; individuals need scratch space and per-branch reviews that should not land in main.",
+  "decision": "team/ is committed; personal/ and config.local.json are gitignored. promote and unshare move records between them. Reviews and notes default to personal.",
+  "consequences": "Everyone with repo access sees team data, and access follows repo permissions. Personal data stays on one machine.",
+  "before": "everything in one place",
+  "after": "team/ (shared) and personal/ (local)",
+  "components": [
+    ".repostate/team/",
+    ".repostate/personal/"
+  ],
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T05:29:36Z",
+  "updated_at": "2026-11-24T05:29:36Z",
+  "done_at": "2026-11-24T05:29:36Z"
+}

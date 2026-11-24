@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.8", "3.13"]
+        exclude:
+          - os: macos-latest
+            python: "3.8"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: This repo's own records are valid
+        run: python skills/repostate/scripts/repostate.py validate
+      - name: Vendored copy matches the skill
+        shell: bash
+        run: diff -q skills/repostate/scripts/repostate.py .repostate/repostate.py && diff -q skills/repostate/assets/index.html .repostate/index.html

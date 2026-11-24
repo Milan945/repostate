@@ -1,0 +1,9 @@
+{
+  "id": "G-2pay",
+  "status": "active",
+  "title": "Install in one step on every major agent",
+  "body": "Claude Code plugin, plus tested install paths for Cursor, Codex and other Agent Skills tools.",
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T05:29:34Z",
+  "updated_at": "2026-11-24T05:29:34Z"
+}

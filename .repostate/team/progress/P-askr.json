@@ -1,0 +1,10 @@
+{
+  "id": "P-askr",
+  "summary": "Built v0.1: CLI, importer, dashboard, three skills, tests and CI",
+  "details": "Core CLI with atomic writes and validation; markdown import and export; static dashboard; repostate, repostate-review and repostate-architecture skills; Claude Code plugin manifest; PR summary Action; 29 tests.",
+  "branch": "main",
+  "commit": "568fbff",
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T05:29:36Z",
+  "updated_at": "2026-11-24T05:29:36Z"
+}

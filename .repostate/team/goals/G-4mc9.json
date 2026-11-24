@@ -1,0 +1,9 @@
+{
+  "id": "G-4mc9",
+  "status": "active",
+  "title": "Edit from the dashboard",
+  "body": "Change status, assignee and priority in the browser, written back through the CLI.",
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T05:29:34Z",
+  "updated_at": "2026-11-24T05:29:34Z"
+}

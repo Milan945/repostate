@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "project": {
+    "name": "repostate",
+    "accent": "#2563EB"
+  },
+  "priorities": [
+    "low",
+    "medium",
+    "high",
+    "urgent"
+  ],
+  "types": {},
+  "hidden": [],
+  "reviews": {
+    "archive_merged": true
+  }
+}

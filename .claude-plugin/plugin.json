@@ -1,0 +1,13 @@
+{
+  "name": "repostate",
+  "version": "0.1.0",
+  "description": "Keep tasks, goals, progress, code reviews and architecture decisions as JSON in the repo, with a static HTML dashboard. Imports tasks.md; team data shared through git, personal data stays local.",
+  "author": {
+    "name": "Milan945",
+    "url": "https://github.com/Milan945"
+  },
+  "homepage": "https://github.com/Milan945/repostate",
+  "repository": "https://github.com/Milan945/repostate",
+  "license": "MIT",
+  "keywords": ["project-management", "tasks", "progress", "code-review", "architecture", "adr", "dashboard"]
+}

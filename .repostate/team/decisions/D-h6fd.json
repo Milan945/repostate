@@ -1,0 +1,21 @@
+{
+  "id": "D-h6fd",
+  "status": "accepted",
+  "title": "One JSON file per record instead of one tasks.json",
+  "context": "Several people and agents edit the same repo on different branches. A single file conflicts on almost every merge.",
+  "decision": "Each record is its own file at .repostate/<scope>/<type>/<id>.json, with random ids so two branches never create the same id.",
+  "consequences": "Merges only conflict when two people edit the same record. Listing needs a folder scan, which is fast at repo scale.",
+  "alternatives": [
+    "One JSON file per type",
+    "JSONL with a custom merge driver"
+  ],
+  "before": "tasks.md, progress.md edited by hand",
+  "after": "one JSON file per record, written by the CLI",
+  "components": [
+    "skills/repostate/scripts/repostate.py"
+  ],
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T05:29:36Z",
+  "updated_at": "2026-11-24T05:29:36Z",
+  "done_at": "2026-11-24T05:29:36Z"
+}

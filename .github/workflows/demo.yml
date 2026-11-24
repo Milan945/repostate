@@ -1,0 +1,43 @@
+# Publishes this repo's own dashboard (.repostate/) as a live demo on GitHub Pages.
+# One-time setup: Settings > Pages > Source: GitHub Actions.
+# Only team records are committed, so only team records are published.
+name: demo dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".repostate/**"
+      - "skills/repostate/assets/index.html"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build the dashboard
+        run: |
+          python3 .repostate/repostate.py build
+          mkdir -p site
+          cp .repostate/index.html .repostate/data.js site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

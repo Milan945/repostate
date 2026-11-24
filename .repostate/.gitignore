@@ -1,0 +1,5 @@
+# repostate: private and generated files stay out of git
+personal/
+config.local.json
+data.js
+.lock
