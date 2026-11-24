@@ -224,6 +224,8 @@ This repo tracks itself with repostate: see [`.repostate/team/decisions.json`](.
 python3 -m unittest discover -s tests -v
 ```
 
+To release, bump `version` in `.claude-plugin/plugin.json`, add a section to `CHANGELOG.md`, and merge to `main`: a workflow tags the commit and publishes the release.
+
 `skills/repostate/scripts/repostate.py` and `skills/repostate/assets/index.html` are the sources. After changing them, run `python3 skills/repostate/scripts/repostate.py init` at the repo root to refresh the copies in `.repostate/`. CI checks that they match.
 
 ## License

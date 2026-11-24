@@ -6,7 +6,7 @@
 - Demo walkthrough at the top of the README.
 - Dashboard: the task detail header no longer has the hours bar drawn over it while scrolling.
 - Dashboard: the overview leaves out the Goals panel when a project has no goals, and keeps up to six summary tiles on one row.
-- Releases are published automatically when a version tag is pushed.
+- Releases are published automatically when the version in `.claude-plugin/plugin.json` changes on `main`.
 
 ## 0.3.0 - 2026-11-24
 

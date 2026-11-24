@@ -1,13 +1,24 @@
-# Publishes a GitHub release when a version tag (v1.2.3) is pushed.
-# The release notes are that version's section of CHANGELOG.md.
+# Publishes a GitHub release for the version in .claude-plugin/plugin.json.
+# Runs when that version changes on main (or by hand). If the release
+# already exists it does nothing. The tag vX.Y.Z is created on the pushed
+# commit, and the release notes are that version's section of CHANGELOG.md.
 name: release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths:
+      - ".claude-plugin/plugin.json"
+      - "CHANGELOG.md"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -15,24 +26,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag matches the plugin version
+      - name: Read the version
+        id: version
         run: |
           version=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "tag $GITHUB_REF_NAME does not match plugin.json version $version" >&2
-            exit 1
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether it is already released
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.version.outputs.tag }} is already released"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Release notes from CHANGELOG.md
+        if: steps.exists.outputs.already == 'false'
         run: |
-          python3 - "${GITHUB_REF_NAME#v}" > notes.md <<'PY'
+          python3 - "${{ steps.version.outputs.version }}" > notes.md <<'PY'
           import re, sys
           text = open("CHANGELOG.md", encoding="utf-8").read()
           m = re.search(r"^## %s\b.*?\n(.*?)(?=^## |\Z)" % re.escape(sys.argv[1]), text, re.S | re.M)
-          print((m.group(1).strip() if m else "See CHANGELOG.md.") + "\n\n**Install or update:** see the [README](https://github.com/Milan945/repostate#install).")
+          print((m.group(1).strip() if m else "See CHANGELOG.md.")
+                + "\n\n**Install or update:** see the [README](https://github.com/Milan945/repostate#install).")
           PY
 
-      - name: Create the release
+      - name: Create the tag and release
+        if: steps.exists.outputs.already == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "repostate $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "repostate ${{ steps.version.outputs.tag }}" --notes-file notes.md
