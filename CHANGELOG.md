@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 - 2026-11-24
+
+- GitHub workflows use the Node 24 versions of the official actions (checkout v7, setup-python v7, configure-pages v6, upload-pages-artifact v5, deploy-pages v5), which removes the Node.js 20 deprecation warning. This includes the pull request summary workflow that `init --actions` adds to your repo; run `init --actions` again to update an existing copy.
+
 ## 0.3.2 - 2026-11-24
 
 - Import records the right source file when the repo is reached through a symlinked folder (for example macOS temp folders). Before, `source.file` could become a long `../../` path.
