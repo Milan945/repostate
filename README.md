@@ -130,7 +130,7 @@ Run `python3 .repostate/repostate.py --help` for every command.
 
 ![Traceability](docs/images/trace.png)
 
-**Evidence.** Images in `screenshots/` and `ui-review/` are attached to the record whose id is in the file or folder name (`screenshots/T002-before.png`), and shown as thumbnails on the task and on an Evidence page.
+**Evidence.** Images in `screenshots/` and `ui-review/` are attached to the record whose id is in the file or folder name (`screenshots/T002-before.png`), and shown as thumbnails on the task and on an Evidence page. Clicking one opens a viewer on the page, where you can step through the before and after shots with the arrow keys.
 
 **Decisions and open questions.** Decisions with owner and status, open questions, and everything that is waiting on someone else, grouped by who.
 

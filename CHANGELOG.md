@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 - 2026-11-24
+
+- Screenshots open in a viewer on the page instead of a new browser tab: arrow keys, on-screen buttons, a thumbnail strip or a swipe move between images; the before/after label shows which is which; clicking the image or Z toggles full size; Esc, the close button or a click outside closes it.
+- The detail panel and the viewer fade and slide in and out, and close on a click outside. Animations are skipped when the system asks for reduced motion.
+
 ## 0.3.3 - 2026-11-24
 
 - GitHub workflows use the Node 24 versions of the official actions (checkout v7, setup-python v7, configure-pages v6, upload-pages-artifact v5, deploy-pages v5), which removes the Node.js 20 deprecation warning. This includes the pull request summary workflow that `init --actions` adds to your repo; run `init --actions` again to update an existing copy.
