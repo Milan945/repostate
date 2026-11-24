@@ -22,7 +22,7 @@ import sys
 import time
 import webbrowser
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 STATE_DIR = ".repostate"
 SCOPES = ("team", "personal")
 ID_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
@@ -1946,7 +1946,7 @@ def cmd_import(store, args):
             raise StateError("%s does not exist" % path)
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
-        rel = os.path.relpath(os.path.abspath(path), store.root).replace(os.sep, "/")
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(store.root)).replace(os.sep, "/")
         file_type = forced or guess_type(path)
         groups = {}
         tables = list(find_tables(text))

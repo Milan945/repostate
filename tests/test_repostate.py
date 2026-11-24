@@ -334,6 +334,20 @@ class TestImport(RepoCase):
         self.assertEqual((adr["title"], adr["status"]), ("Keys in Postgres", "accepted"))
         self.assertEqual(adr["decision"], "Store them in Postgres.")
 
+    @unittest.skipIf(os.name == "nt", "symlinks need extra rights on Windows")
+    def test_source_path_through_a_symlinked_folder(self):
+        self.write("tasks.md", "- [ ] One\n")
+        link = self.dir + "-link"
+        os.symlink(self.dir, link)
+        try:
+            proc = subprocess.run([sys.executable, SCRIPT, "--root", link, "import", "tasks.md"], cwd=link,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        finally:
+            os.remove(link)
+        (task,) = self.run_json("list", "tasks")
+        self.assertEqual(task["source"], {"file": "tasks.md", "line": 1})
+
     def test_unknown_file_needs_type(self):
         self.write("notes-from-call.md", "- something\n")
         self.assertEqual(self.run_cli("import", "notes-from-call.md").returncode, 1)

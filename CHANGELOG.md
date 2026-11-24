@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 - 2026-11-24
+
+- Import records the right source file when the repo is reached through a symlinked folder (for example macOS temp folders). Before, `source.file` could become a long `../../` path.
+- CI tests Python 3.10 and 3.13 on Linux, macOS and Windows (GitHub's Linux runners no longer offer 3.8).
+
 ## 0.3.1 - 2026-11-24
 
 - Live demo on GitHub Pages, built from the example project in `examples/messaging-app`.
