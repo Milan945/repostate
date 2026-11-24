@@ -30,6 +30,22 @@ Common fields on any type:
 
 `priority` is one of `config.priorities` (default `low, medium, high, urgent`). `goal`, `parent` and `depends_on` must point at existing ids.
 
+More task fields, all optional:
+
+| Field | Type | Shown as |
+|---|---|---|
+| `slice` | string | Slices view, slice progress and hours |
+| `estimate_hours`, `actual_hours` | number | Hours view; `hours <id> <n>` adds to actual |
+| `requirements` | list of ids | chips on the task, Traceability page |
+| `repos` | list (`owner/repo` or URL) | links |
+| `prs` | list (`#12`, `owner/repo#12` or URL) | links |
+| `figma` | list of URLs | links |
+| `evidence` | list of URLs or repo paths | links, or thumbnails for images |
+| `waiting_on` | string | "Waiting on others" list |
+| `history` | list | written by the CLI on every status change and `hours`; drives the task timeline |
+
+Put the task's requirements text and acceptance notes in `body`.
+
 ## goals (`G-`)
 
 ```json
@@ -62,7 +78,43 @@ Progress on a goal is computed from the tasks whose `goal` points at it.
   "supersedes": "D-0old", "superseded_by": null }
 ```
 
-Statuses: `proposed → accepted → superseded → rejected`.
+Statuses: `proposed → accepted → superseded → rejected`. Optional `owner` and `waiting_on`.
+
+## testcases (`TC-`)
+
+```json
+{ "id": "TC-014", "title": "Badge caps at 99+", "status": "fail", "kind": "ui",
+  "task": "T003", "bug": "BUG-007", "requirements": ["MSG-03"],
+  "steps": "…", "expected": "Shows 99+", "status_note": "…", "evidence": [] }
+```
+
+`status` is the result: `not_run`, `pass`, `pass_with_question`, `fail`, `blocked`. `pass` and `pass_with_question` count as passing. A test with no `requirements` inherits its task's for traceability.
+
+## bugs (`B-`)
+
+```json
+{ "id": "BUG-007", "title": "Badge shows 100 instead of 99+", "status": "open",
+  "severity": "medium", "task": "T003", "testcase": "TC-014", "fix_commit": "a1b2c3d" }
+```
+
+Statuses `open → fixing → fixed`, or `wontfix`. `severity`: `low`, `medium`, `high`, `critical`.
+
+## requirements (`REQ-`, usually your own ids)
+
+```json
+{ "id": "MSG-03", "title": "Unread count is visible", "body": "…" }
+```
+
+No status: the Traceability page works it out from the tasks and tests that name the id.
+
+## questions (`Q-`)
+
+```json
+{ "id": "Q-4k2p", "title": "Do we need read receipts in v1?", "status": "open",
+  "owner": "milan", "waiting_on": "Client", "task": "T006", "answer": null }
+```
+
+Statuses `open → answered`. Shown on the Decisions page.
 
 ## reviews (`R-`): code reviews
 

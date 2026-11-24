@@ -1,6 +1,6 @@
 # .repostate
 
-This folder holds the project's tasks, goals, progress log, code reviews and architecture decisions as JSON. It is managed by [repostate](https://github.com/Milan945/repostate).
+This folder holds the project's tasks, goals, progress log, test cases, bugs, code reviews and decisions as JSON. It is managed by [repostate](https://github.com/Milan945/repostate).
 
 ## See the dashboard
 

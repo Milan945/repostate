@@ -45,6 +45,8 @@ EOF
 
 Write `before` and `after` as one short line each, using arrows for flows. `components` are paths or module names. `tasks` links the work that implements it; for new work, create the tasks first with `add tasks … --tags architecture`.
 
+Add `"owner": "<name>"` when someone owns the decision, and `"waiting_on": "<name>"` while it waits on another person; the dashboard's Decisions page shows owner and status in a table and lists what is waiting on others. A question that is not yet a decision goes in as an open question: `add questions --title "…" --owner … --waiting-on …` (see the repostate skill).
+
 Confirm in chat with the id, the status, and one sentence on the change.
 
 ## Replacing an earlier decision

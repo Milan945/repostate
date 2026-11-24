@@ -21,15 +21,25 @@ import sys
 import time
 import webbrowser
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 STATE_DIR = ".repostate"
 SCOPES = ("team", "personal")
 ID_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$")
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+TYPE_ALIASES = {"tests": "testcases", "test": "testcases", "defects": "bugs", "defect": "bugs",
+                "reqs": "requirements", "req": "requirements"}
 
 BUILTIN_TYPES = {
     "tasks": {
         "prefix": "T", "label": "Tasks", "view": "board", "scope": "team",
         "statuses": ["todo", "doing", "done"], "done": ["done"],
+        "fields": {
+            "slice": {"type": "string"}, "estimate_hours": {"type": "number"},
+            "actual_hours": {"type": "number"}, "requirements": {"type": "list"},
+            "repos": {"type": "list"}, "prs": {"type": "list"},
+            "evidence": {"type": "list"}, "figma": {"type": "list"},
+        },
     },
     "goals": {
         "prefix": "G", "label": "Goals", "view": "cards", "scope": "team",
@@ -40,8 +50,33 @@ BUILTIN_TYPES = {
         "statuses": [], "done": [],
     },
     "decisions": {
-        "prefix": "D", "label": "Architecture", "view": "cards", "scope": "team",
+        "prefix": "D", "label": "Decisions", "view": "cards", "scope": "team",
         "statuses": ["proposed", "accepted", "superseded", "rejected"], "done": ["accepted"],
+        "fields": {"owner": {"type": "string"}, "waiting_on": {"type": "string"}},
+    },
+    "testcases": {
+        "prefix": "TC", "label": "Tests", "view": "table", "scope": "team",
+        "statuses": ["not_run", "pass", "pass_with_question", "fail", "blocked"],
+        "done": ["pass", "pass_with_question"],
+        "fields": {"task": {"type": "string"}, "kind": {"type": "string"}, "bug": {"type": "string"},
+                   "requirements": {"type": "list"}, "evidence": {"type": "list"}},
+    },
+    "bugs": {
+        "prefix": "B", "label": "Bugs", "view": "table", "scope": "team",
+        "statuses": ["open", "fixing", "fixed", "wontfix"], "done": ["fixed", "wontfix"],
+        "fields": {"task": {"type": "string"}, "testcase": {"type": "string"},
+                   "severity": {"type": "enum", "options": ["low", "medium", "high", "critical"]},
+                   "fix_commit": {"type": "string"}, "evidence": {"type": "list"}},
+    },
+    "requirements": {
+        "prefix": "REQ", "label": "Requirements", "view": "table", "scope": "team",
+        "statuses": [], "done": [],
+    },
+    "questions": {
+        "prefix": "Q", "label": "Open questions", "view": "table", "scope": "team",
+        "statuses": ["open", "answered"], "done": ["answered"],
+        "fields": {"owner": {"type": "string"}, "waiting_on": {"type": "string"},
+                   "task": {"type": "string"}, "answer": {"type": "string"}},
     },
     "reviews": {
         "prefix": "R", "label": "Code reviews", "view": "list", "scope": "personal",
@@ -60,6 +95,8 @@ DEFAULT_CONFIG = {
     "types": {},
     "hidden": [],
     "reviews": {"archive_merged": True},
+    "evidence": {"dirs": ["screenshots", "ui-review"]},
+    "slices": {},
 }
 
 SEVERITIES = ["blocking", "major", "minor", "note"]
@@ -214,12 +251,14 @@ class Store:
                         "view": "table", "scope": "team", "statuses": [], "done": []}
                 result[name] = deep_merge(base, spec)
         for spec in result.values():
-            if spec.get("statuses") and not spec.get("done"):
-                spec["done"] = [spec["statuses"][-1]]
+            statuses = spec.get("statuses") or []
+            done = [d for d in (spec.get("done") or []) if d in statuses]
+            spec["done"] = done or statuses[-1:]
         return result
 
     def type_spec(self, rtype):
         types = self.types()
+        rtype = TYPE_ALIASES.get(rtype, rtype) if rtype not in types else rtype
         if rtype not in types:
             singular = {k.rstrip("s"): k for k in types}
             if rtype in singular:
@@ -335,8 +374,13 @@ class Store:
         scope, rtype, archived, path = self.find(rid)
         return read_json(path), scope, rtype, archived, path
 
-    def new_id(self, prefix):
+    def new_id(self, prefix, spec=None):
         taken = {os.path.basename(p)[:-5].lower() for _, _, _, p in self.iter_files()}
+        if (spec or {}).get("ids") == "sequential":
+            width = int(spec.get("id_width") or 3)
+            pattern = re.compile(r"^%s-?0*(\d+)$" % re.escape(prefix.lower()))
+            numbers = [int(m.group(1)) for m in (pattern.match(t) for t in taken) if m]
+            return "%s%0*d" % (prefix, width, max(numbers or [0]) + 1)
         rng = random.SystemRandom()
         for length in (4, 5, 6, 8):
             for _ in range(50):
@@ -386,8 +430,9 @@ class Store:
                                     % (f.get("id"), f.get("severity"), ", ".join(SEVERITIES)))
         if ids is not None:
             refs = []
-            if rec.get("goal"):
-                refs.append(rec["goal"])
+            for key in ("goal", "task", "testcase", "bug"):
+                if rec.get(key):
+                    refs.append(rec[key])
             for key in ("depends_on", "tasks", "related"):
                 refs.extend(rec.get(key) or [])
             if rec.get("parent"):
@@ -398,6 +443,41 @@ class Store:
         return problems
 
     # ---- the generated bundle the viewer reads
+    def web_url(self):
+        """https URL of the origin remote, without credentials, for PR and commit links."""
+        url = git(["config", "--get", "remote.origin.url"], self.root)
+        m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+?)(?:\.git)?/?$", url)
+        if not m:
+            m = re.match(r"^https?://(?:[^@/]+@)?([^/]+)/(.+?)(?:\.git)?/?$", url)
+        return "https://%s/%s" % (m.group(1), m.group(2)) if m else ""
+
+    def scan_evidence(self, records):
+        """Images under the evidence folders, matched to records by an id in the path."""
+        dirs = (self.config.get("evidence") or {}).get("dirs") or []
+        ids = sorted({str(r["id"]).lower() for r in records if r.get("id")}, key=len, reverse=True)
+        pattern = re.compile(r"(?<![a-z0-9])(%s)(?![a-z0-9])" % "|".join(re.escape(i) for i in ids)) if ids else None
+        found = []
+        for folder in dirs:
+            base = os.path.join(self.root, folder)
+            if not os.path.isdir(base):
+                continue
+            for dirpath, dirnames, filenames in os.walk(base):
+                dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+                for name in sorted(filenames):
+                    if not name.lower().endswith(IMAGE_EXT):
+                        continue
+                    rel = os.path.relpath(os.path.join(dirpath, name), self.root).replace(os.sep, "/")
+                    lower = name.lower()
+                    label = ""
+                    for word in ("before", "after"):
+                        if re.search(r"(?<![a-z])%s(?![a-z])" % word, lower):
+                            label = word
+                    found.append({"path": rel, "label": label,
+                                  "ids": sorted(set(pattern.findall(rel.lower()))) if pattern else []})
+                    if len(found) >= 3000:
+                        return found
+        return found
+
     def build(self):
         records = self.all_records()
         branches = {}
@@ -421,7 +501,9 @@ class Store:
                 "default_branch": default_branch,
                 "branches": branches,
                 "me": self.me(),
+                "web": self.web_url(),
             },
+            "evidence": self.scan_evidence(records),
             "records": records,
         }
         text = "/* generated by repostate; do not edit, do not commit */\nwindow.REPOSTATE = %s;\n" % json.dumps(
@@ -464,13 +546,85 @@ def merge_json_arg(rec, raw):
         rec[key] = value
 
 
-def create_record(store, rtype, fields, scope=None, quiet=False):
+SIMPLE_FLAGS = [("title", "title"), ("status", "status"), ("priority", "priority"), ("goal", "goal"),
+                ("assignee", "assignee"), ("parent", "parent"), ("body", "body"), ("summary", "summary"),
+                ("task", "task"), ("slice", "slice"), ("estimate", "estimate_hours"),
+                ("actual", "actual_hours"), ("severity", "severity"), ("kind", "kind"),
+                ("owner", "owner"), ("waiting_on", "waiting_on")]
+
+
+def apply_adds(rec, spec, adds):
+    """--add key=value: append to a list field without resending the whole list."""
+    for item in adds or []:
+        if "=" not in item:
+            raise StateError("--add expects key=value, got %r" % item)
+        key, value = item.split("=", 1)
+        key = key.strip()
+        current = rec.get(key) or []
+        if not isinstance(current, list):
+            raise StateError("%s is not a list, use --set" % key)
+        rec[key] = current + [v.strip() for v in value.split(",") if v.strip() and v.strip() not in current]
+
+
+def apply_simple_flags(rec, args, clearing):
+    for flag, key in SIMPLE_FLAGS:
+        value = getattr(args, flag, None)
+        if value is None or (value == "" and not clearing):
+            continue
+        if key in ("severity", "kind") and isinstance(value, str):
+            value = value.strip().lower()
+        rec[key] = None if value == "" else value
+
+
+def check_links(store, rec):
+    """Refuse links to records that do not exist."""
+    ids = {os.path.basename(p)[:-5].lower() for _, _, _, p in store.iter_files()}
+    refs = [(k, rec.get(k)) for k in ("goal", "parent", "task", "testcase", "bug")]
+    refs += [("depends_on", d) for d in rec.get("depends_on") or []]
+    for key, ref in refs:
+        if ref and str(ref).lower() not in ids:
+            raise StateError("%s: %s does not exist" % (key, ref))
+
+
+def record_status_change(store, rec, spec, old):
+    new = rec.get("status")
+    stamp = now_iso()
+    if new in (spec.get("done") or []):
+        rec.setdefault("done_at", stamp)
+    else:
+        rec.pop("done_at", None)
+    if new != old:
+        history = rec.get("history") or []
+        history.append({"at": stamp, "by": store.author(), "field": "status", "from": old, "to": new})
+        rec["history"] = history[-200:]
+
+
+def add_hours(store, rec, hours, note=None):
+    rec["actual_hours"] = round((rec.get("actual_hours") or 0) + hours, 2)
+    entry = {"at": now_iso(), "by": store.author(), "field": "hours", "add": hours}
+    if note:
+        entry["note"] = note
+    rec["history"] = ((rec.get("history") or []) + [entry])[-200:]
+    rec["updated_at"] = entry["at"]
+
+
+def create_record(store, rtype, fields, scope=None, rid=None, check=True):
     """Create a record of rtype from a dict. Returns (rec, scope)."""
     rtype, spec = store.type_spec(rtype)
     scope = scope or spec.get("scope", "team")
     if scope not in SCOPES:
         raise StateError("scope must be team or personal")
-    rec = {"id": store.new_id(spec["prefix"])}
+    if rid:
+        rid = str(rid).strip()
+        if not ID_RE.match(rid):
+            raise StateError("id %r is not usable: letters, digits, dot, dash and underscore, up to 40 characters" % rid)
+        try:
+            store.find(rid)
+        except StateError:
+            pass
+        else:
+            raise StateError("id %s is already used" % rid)
+    rec = {"id": rid or store.new_id(spec["prefix"], spec)}
     if spec.get("statuses"):
         rec["status"] = spec["statuses"][0]
     for key, value in fields.items():
@@ -485,6 +639,8 @@ def create_record(store, rtype, fields, scope=None, quiet=False):
     problems = store.check_record(rec, rtype, spec)
     if problems:
         raise StateError("; ".join(problems))
+    if check:
+        check_links(store, rec)
     store.save(rec, scope, rtype)
     return rec, scope
 
@@ -562,7 +718,8 @@ def cmd_init(store, args):
 
 
 def find_markdown_candidates(root):
-    pattern = re.compile(r"(task|todo|backlog|progress|changelog|worklog|journal|goal|roadmap|milestone|decision|adr|plan)", re.I)
+    pattern = re.compile(r"(task|todo|backlog|progress|changelog|worklog|journal|goal|roadmap|milestone|decision|adr|plan"
+                         r"|test|defect|bug|question|requirement|hub)", re.I)
     found = []
     for base in (root, os.path.join(root, "docs"), os.path.join(root, ".claude")):
         if not os.path.isdir(base):
@@ -620,65 +777,55 @@ def cmd_hooks(store, args):
 def cmd_add(store, args):
     store.require()
     rtype, spec = store.type_spec(args.type)
-    fields = {
-        "title": args.title,
-        "status": args.status,
-        "priority": args.priority,
-        "goal": args.goal,
-        "assignee": args.assignee,
-        "parent": args.parent,
-        "body": args.body,
-        "tags": split_list(args.tags),
-        "depends_on": split_list(args.depends),
-    }
-    if rtype == "progress" and args.title and not args.summary:
-        fields["summary"] = fields.pop("title")
-    if args.summary:
-        fields["summary"] = args.summary
+    if getattr(args, "result", None):
+        args.status = args.result
     rec = {}
     merge_json_arg(rec, args.json_data)
     apply_fields(rec, spec, args.set)
-    for k, v in fields.items():
-        if v not in (None, []):
-            rec[k] = v
+    apply_adds(rec, spec, args.add)
+    apply_simple_flags(rec, args, clearing=False)
+    if split_list(args.tags):
+        rec["tags"] = split_list(args.tags)
+    if split_list(args.depends):
+        rec["depends_on"] = split_list(args.depends)
     if rtype == "progress":
+        if rec.get("title") and not rec.get("summary"):
+            rec["summary"] = rec.pop("title")
         rec.setdefault("branch", store.branch() or None)
         rec.setdefault("commit", store.head() or None)
     scope = "personal" if args.personal else ("team" if args.team else None)
     with store.lock():
-        rec, scope = create_record(store, rtype, rec, scope)
+        rec, scope = create_record(store, rtype, rec, scope, rid=args.id)
     label = rec.get("title") or rec.get("summary")
     finish(store, args, rec, "%s  %s  [%s, %s]" % (rec["id"], label, rtype, scope))
 
 
 def cmd_update(store, args):
     store.require()
+    if getattr(args, "result", None):
+        args.status = args.result
     with store.lock():
         rec, scope, rtype, archived, path = store.load(args.id)
         rtype, spec = store.type_spec(rtype)
-        merge_json_arg(rec, args.json_data)
-        apply_fields(rec, spec, args.set)
-        for key in ("title", "status", "priority", "goal", "assignee", "parent", "body", "summary"):
-            value = getattr(args, key, None)
-            if value is not None:
-                rec[key] = None if value == "" else value
-        if args.tags is not None:
+        old_status = rec.get("status")
+        merge_json_arg(rec, getattr(args, "json_data", None))
+        apply_fields(rec, spec, getattr(args, "set", None))
+        apply_adds(rec, spec, getattr(args, "add", None))
+        apply_simple_flags(rec, args, clearing=True)
+        if getattr(args, "tags", None) is not None:
             rec["tags"] = split_list(args.tags)
-        if args.add_tag:
+        if getattr(args, "add_tag", None):
             rec["tags"] = sorted(set(rec.get("tags") or []) | set(split_list(args.add_tag)))
-        if args.depends is not None:
+        if getattr(args, "depends", None) is not None:
             rec["depends_on"] = split_list(args.depends)
-        if args.add_depends:
+        if getattr(args, "add_depends", None):
             deps = rec.get("depends_on") or []
             rec["depends_on"] = deps + [d for d in split_list(args.add_depends) if d not in deps]
-        for key in args.unset or []:
+        for key in getattr(args, "unset", None) or []:
             rec.pop(key, None)
         rec = {k: v for k, v in rec.items() if v is not None}
-        done = spec.get("done") or []
-        if rec.get("status") in done:
-            rec.setdefault("done_at", now_iso())
-        elif "done_at" in rec:
-            rec.pop("done_at")
+        check_links(store, rec)
+        record_status_change(store, rec, spec, old_status)
         rec["updated_at"] = now_iso()
         problems = store.check_record(rec, rtype, spec)
         if problems:
@@ -689,10 +836,7 @@ def cmd_update(store, args):
 
 def cmd_set_status(status):
     def run(store, args):
-        args.set, args.json_data, args.tags, args.add_tag, args.depends = None, None, None, None, None
-        args.add_depends, args.unset = None, None
-        for key in ("title", "priority", "goal", "assignee", "parent", "body", "summary"):
-            setattr(args, key, None)
+        store.require()
         rec, _, rtype, _, _ = store.load(args.id)
         _, spec = store.type_spec(rtype)
         target = status
@@ -708,31 +852,61 @@ def cmd_set_status(status):
     return run
 
 
+def cmd_hours(store, args):
+    store.require()
+    with store.lock():
+        rec, scope, rtype, archived, path = store.load(args.id)
+        add_hours(store, rec, args.hours, args.note)
+        store.save(rec, scope, rtype, archived)
+    finish(store, args, rec, "%s: %s h actual%s" % (
+        rec["id"], rec["actual_hours"],
+        (" of %s h estimated" % rec["estimate_hours"]) if rec.get("estimate_hours") else ""))
+
+
 def cmd_log(store, args):
     store.require()
     rec = {"summary": args.summary}
     if args.details:
         rec["details"] = args.details
-    if args.tasks:
-        rec["tasks"] = split_list(args.tasks)
+    touched = split_list(args.tasks)
+    finished = split_list(args.done)
+    if touched or finished:
+        rec["tasks"] = touched + [t for t in finished if t not in touched]
     if args.files:
         rec["files"] = split_list(args.files)
     if args.session:
         rec["session"] = args.session
+    if args.hours:
+        rec["hours"] = args.hours
     rec["branch"] = store.branch() or None
     rec["commit"] = store.head() or None
     scope = "personal" if args.personal else None
     with store.lock():
-        rec, scope = create_record(store, "progress", rec, scope)
+        rec, scope = create_record(store, "progress", rec, scope, check=False)
         closed = []
-        for tid in split_list(args.done):
+        booked = None
+        for tid in rec.get("tasks") or []:
             task, tscope, ttype, tarch, _ = store.load(tid)
             _, tspec = store.type_spec(ttype)
-            task["status"] = (tspec.get("done") or ["done"])[0]
-            task["done_at"] = task["updated_at"] = now_iso()
-            store.save(task, tscope, ttype, tarch)
-            closed.append(task["id"])
+            changed = False
+            if args.hours and len(rec["tasks"]) == 1:
+                add_hours(store, task, args.hours, rec["summary"])
+                booked = task["id"]
+                changed = True
+            if tid in finished:
+                old = task.get("status")
+                task["status"] = (tspec.get("done") or ["done"])[0]
+                record_status_change(store, task, tspec, old)
+                task["updated_at"] = now_iso()
+                closed.append(task["id"])
+                changed = True
+            if changed:
+                store.save(task, tscope, ttype, tarch)
     extra = (" and marked done: " + ", ".join(closed)) if closed else ""
+    if booked:
+        extra += "; %s h booked on %s" % (args.hours, booked)
+    elif args.hours:
+        extra += "; %s h kept on the entry only (name exactly one task to book them)" % args.hours
     finish(store, args, rec, "%s logged%s" % (rec["id"], extra))
 
 
@@ -980,6 +1154,12 @@ def cmd_validate(store, args):
                 if other and other["_scope"] == "personal":
                     errors.append("%s: depends on %s, which is personal and invisible to the team"
                                   % (rec["_path"], key))
+    known_reqs = {str(r.get("id", "")).lower() for r in records if r["_type"] == "requirements"}
+    if known_reqs:
+        for rec in records:
+            for req in rec.get("requirements") or []:
+                if str(req).lower() not in known_reqs:
+                    errors.append("%s: requirement %s is not in the requirements list" % (rec["_path"], req))
     if args.json:
         print(json.dumps({"ok": not errors, "errors": errors, "records": len(records)}, indent=2))
     elif errors:
@@ -1011,6 +1191,14 @@ def cmd_summary(store, args):
         linked = [t for t in tasks if t.get("goal") == g["id"]]
         done = len([t for t in linked if t.get("status") in types["tasks"]["done"]])
         lines.append("- Goal **%s**: %d of %d tasks done" % (g["title"], done, len(linked)))
+    for rtype, name in (("testcases", "Tests"), ("bugs", "Bugs")):
+        group = [r for r in records if r["_type"] == rtype]
+        if group:
+            counts = {}
+            for r in group:
+                counts[r.get("status")] = counts.get(r.get("status"), 0) + 1
+            lines.append("**%s:** " % name + " · ".join(
+                "%s %d" % (str(st).replace("_", " "), counts[st]) for st in types[rtype]["statuses"] if counts.get(st)))
     if args.since:
         changed = git(["diff", "--name-status", "%s...HEAD" % args.since, "--", "%s/team" % STATE_DIR], store.root)
         rows = []
@@ -1085,6 +1273,14 @@ DUE_RE = re.compile(r"(?:^|\s)(?:due|by)[: ]\s*(\d{4}-\d{2}-\d{2})", re.I)
 
 def guess_type(path):
     name = os.path.basename(path).lower()
+    if re.search(r"(^|[^a-z])(tests?|test[-_ ]?cases?|qa)([^a-z]|$)", name):
+        return "testcases"
+    if re.search(r"(bug|defect)", name):
+        return "bugs"
+    if re.search(r"question", name):
+        return "questions"
+    if re.search(r"requirement|(^|[^a-z])reqs?([^a-z]|$)", name):
+        return "requirements"
     if re.search(r"(task|todo|backlog|plan)", name):
         return "tasks"
     if re.search(r"(progress|worklog|journal|log|changelog|history)", name):
@@ -1309,90 +1505,420 @@ def parse_decision_markdown(text, relpath, spec):
     return [rec]
 
 
+TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+MD_LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
+EMPTY_CELLS = {"", "-", "--", "—", "–", "n/a", "na", "none", "tbd", "?", "nil"}
+COLUMN_WORDS = {
+    "id": ["id", "#", "no", "key", "ref"],
+    "title": ["title", "name", "summary", "description", "desc", "scenario", "what"],
+    "status": ["status", "state", "result", "outcome"],
+    "priority": ["priority", "prio"],
+    "severity": ["severity", "sev"],
+    "assignee": ["assignee", "assigned to", "assigned", "who", "dev", "developer"],
+    "owner": ["owner"],
+    "slice": ["slice", "phase", "milestone", "epic", "group", "sprint"],
+    "depends_on": ["depends on", "depends", "dependencies", "deps", "blocked by", "after", "prerequisites"],
+    "estimate_hours": ["estimate", "est", "est h", "estimate h", "estimated hours", "estimate hours", "est hours",
+                       "dev h", "est dev h", "estimated", "dev hours", "est dev hours", "estimated dev h"],
+    "actual_hours": ["actual", "actual h", "actual hours", "spent", "actual dev h", "act h", "act", "actual dev hours"],
+    "requirements": ["requirements", "requirement", "reqs", "req", "req ids", "requirement ids", "covers"],
+    "task": ["task", "task id", "tasks"],
+    "testcase": ["test case", "testcase", "tc", "test", "case", "test id", "tc id", "found by"],
+    "bug": ["bug", "defect", "bug id", "defect id", "bugs", "defects"],
+    "kind": ["kind", "type", "layer", "category"],
+    "fix_commit": ["fix commit", "commit", "fix", "fixed in", "fix sha"],
+    "prs": ["pr", "prs", "pull request", "pull requests", "mr"],
+    "repos": ["repo", "repos", "repository", "repositories"],
+    "evidence": ["evidence", "screenshot", "screenshots", "proof"],
+    "figma": ["figma", "design", "designs"],
+    "waiting_on": ["waiting on", "blocked on", "waiting for"],
+    "answer": ["answer", "resolution"],
+    "body": ["notes", "note", "details", "comment", "comments", "remarks"],
+    "steps": ["steps"],
+    "expected": ["expected", "expected result"],
+    "due": ["due", "due date", "deadline"],
+    "tags": ["tags", "labels"],
+}
+HEADER_TO_FIELD = {word: field for field, words in COLUMN_WORDS.items() for word in words}
+TYPE_COLUMNS = {
+    "tasks": {"task": "title", "tasks": "title", "task id": "id", "owner": "assignee"},
+    "goals": {"goal": "title"},
+    "testcases": {"test case": "title", "testcase": "title", "test": "title", "case": "title", "tc": "id",
+                  "tc id": "id", "test id": "id", "case id": "id"},
+    "bugs": {"bug": "title", "defect": "title", "issue": "title", "bug id": "id", "defect id": "id"},
+    "requirements": {"requirement": "title", "req": "id", "req id": "id", "requirement id": "id"},
+    "decisions": {"decision": "title", "decision id": "id"},
+    "questions": {"question": "title", "open question": "title", "question id": "id"},
+}
+LINK_FIELDS = {"task": ("testcases", "bugs", "questions", "decisions"), "testcase": ("bugs",), "bug": ("testcases",)}
+STATUS_SYNONYMS = {
+    "testcases": [(r"pass\w*\W*(with|w/)?\W*(a\s+)?(question|query|q\b|note|caveat)|pass\w*\s*\?", "pass_with_question"),
+                  (r"\b(pass|passed|ok|green)\b", "pass"), (r"\b(fail|failed|red)\b", "fail"),
+                  (r"\bblock", "blocked"), (r"\b(not run|not_run|pending|todo|skipped|not tested|untested)\b", "not_run")],
+    "bugs": [(r"won.?t\s*fix|wontfix|invalid|duplicate|not a bug", "wontfix"),
+             (r"\b(fixed|closed|resolved|done|verified)\b", "fixed"),
+             (r"\b(fixing|in progress|wip|doing)\b", "fixing"), (r"\b(open|new|reported|todo)\b", "open")],
+    "decisions": [(r"supersed", "superseded"), (r"reject|declin", "rejected"),
+                  (r"\b(accepted|decided|approved|agreed|done|final|closed)\b", "accepted"),
+                  (r"\b(proposed|open|pending|draft|tbd)\b", "proposed")],
+    "questions": [(r"\b(answered|resolved|closed|done)\b", "answered"), (r"\b(open|pending|asked|waiting)\b", "open")],
+}
+PRIORITY_WORDS = {"p0": "urgent", "p1": "high", "p2": "medium", "p3": "low", "critical": "urgent",
+                  "blocker": "urgent", "normal": "medium", "med": "medium", "highest": "urgent", "lowest": "low"}
+SEVERITY_WORDS = {"blocker": "critical", "s1": "critical", "major": "high", "s2": "high", "moderate": "medium",
+                  "normal": "medium", "med": "medium", "s3": "medium", "minor": "low", "trivial": "low", "s4": "low"}
+
+
+def split_row(line):
+    inner = line.strip()[1:-1]
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", inner)]
+
+
+def is_separator(cells):
+    return bool(cells) and all(re.fullmatch(r":?-+:?", c.replace(" ", "")) for c in cells)
+
+
+def find_tables(text):
+    """Yield (heading above the table, header cells, [(line number, cells)])."""
+    lines = text.splitlines()
+    heading, in_code, i = None, False, 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip().startswith("```"):
+            in_code = not in_code
+        elif not in_code:
+            h = HEADING.match(line)
+            if h:
+                heading = h.group(2).strip()
+            elif (TABLE_ROW.match(line) and i + 1 < len(lines) and TABLE_ROW.match(lines[i + 1])
+                  and is_separator(split_row(lines[i + 1]))):
+                rows, j = [], i + 2
+                while j < len(lines) and TABLE_ROW.match(lines[j]):
+                    rows.append((j + 1, split_row(lines[j])))
+                    j += 1
+                yield heading, split_row(line), rows
+                i = j
+                continue
+        i += 1
+
+
+def norm_header(text):
+    text = re.sub(r"[*_`]", "", MD_LINK.sub(r"\1", text)).lower()
+    return re.sub(r"[^a-z0-9#]+", " ", text).strip()
+
+
+def guess_table_type(heading, header):
+    names = {norm_header(h) for h in header}
+    if names & {"severity", "sev", "fix commit", "defect", "defect id", "bug id"}:
+        return "bugs"
+    if names & {"result", "outcome", "expected", "expected result", "scenario", "test case", "testcase", "tc", "tc id"}:
+        return "testcases"
+    if names & {"question", "open question", "waiting on", "answer"}:
+        return "questions"
+    if names & {"decision"}:
+        return "decisions"
+    if names & {"depends on", "depends", "dependencies", "deps", "estimate", "est", "est h", "dev h", "est dev h",
+                "slice", "task", "assignee", "blocked by"}:
+        return "tasks"
+    if names & {"requirement", "req", "req id", "requirement id"}:
+        return "requirements"
+    for pattern, rtype in ((r"test|qa\b", "testcases"), (r"bug|defect", "bugs"), (r"question", "questions"),
+                           (r"decision", "decisions"), (r"requirement", "requirements"),
+                           (r"task|backlog|todo|slice|plan", "tasks"), (r"goal|milestone", "goals")):
+        if heading and re.search(pattern, heading, re.I):
+            return rtype
+    return None
+
+
+def map_columns(header, rtype):
+    """Field name for each table column, or None to skip it."""
+    names = [norm_header(h) for h in header]
+    overrides = TYPE_COLUMNS.get(rtype, {})
+    fields = []
+    for name in names:
+        field = overrides.get(name) or HEADER_TO_FIELD.get(name)
+        if field in LINK_FIELDS and rtype not in LINK_FIELDS[field]:
+            field = None
+        if field is None and name:
+            slug = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+            field = slug if slug and slug not in ("id", "author", "history", "source") else None
+        fields.append(field)
+    # "Task | Title" or "Test case | Scenario": the type-named column is the id when another column is the title
+    if "id" not in fields and fields.count("title") > 1:
+        for i, name in enumerate(names):
+            if overrides.get(name) == "title":
+                fields[i] = "id"
+                break
+    seen = set()
+    for i, field in enumerate(fields):
+        if field in seen:
+            fields[i] = None
+        elif field:
+            seen.add(field)
+    return fields
+
+
+def cell_text(cell):
+    cell = MD_LINK.sub(r"\1", cell)
+    cell = re.sub(r"<br\s*/?>", "\n", cell)
+    return re.sub(r"[*`]|~~", "", cell).strip()
+
+
+def cell_ids(cell):
+    return [t.lstrip("#@") for t in re.split(r"[,;\s]+", cell_text(cell)) if t.lower() not in EMPTY_CELLS]
+
+
+def cell_links(cell):
+    urls = [m.group(2) for m in MD_LINK.finditer(cell)]
+    rest = re.sub(r"[*`<>]", " ", MD_LINK.sub(" ", cell))
+    return urls + [t for t in re.split(r"[,;\s]+", rest) if t.lower() not in EMPTY_CELLS]
+
+
+def cell_hours(cell):
+    m = re.search(r"\d+(?:\.\d+)?", cell_text(cell))
+    if not m:
+        return None
+    value = float(m.group(0))
+    return int(value) if value == int(value) else value
+
+
+def normalise_status(raw, rtype, spec):
+    """Map a table cell onto one of the type's statuses. Returns (status, note or None)."""
+    statuses = spec.get("statuses") or []
+    if not statuses:
+        return None, None
+    text = cell_text(raw)
+    done_word = "pass" if rtype == "testcases" else "done"
+    for mark, word in (("✅", done_word), ("☑", done_word), ("✔", done_word), ("🟢", done_word), ("❌", "fail"),
+                       ("🚧", "in progress"), ("🔄", "in progress"), ("🟡", "in progress"), ("⏳", "todo"),
+                       ("⬜", "todo"), ("🔴", "blocked"), ("⛔", "blocked"), ("❓", " question")):
+        text = text.replace(mark, " %s " % word)
+    low = re.sub(r"\s+", " ", text.replace("️", "")).strip().lower()
+    if low in EMPTY_CELLS:
+        return statuses[0], None
+    slug = re.sub(r"[^a-z0-9]+", "_", low).strip("_")
+    if slug in statuses:
+        return slug, None
+    for pattern, status in STATUS_SYNONYMS.get(rtype, []):
+        if status in statuses and re.search(pattern, low):
+            note = text.strip() if status == "pass_with_question" and re.search(r"[:(?]", text) else None
+            return status, note
+    if rtype not in STATUS_SYNONYMS:
+        word = heading_status(low)
+        if word:
+            return map_status(word, spec), None
+    return statuses[0], cell_text(raw)
+
+
+def parse_table(store, header, rows, rtype, spec, relpath):
+    fields = map_columns(header, rtype)
+    priorities = store.config.get("priorities") or []
+    severities = ((spec.get("fields") or {}).get("severity") or {}).get("options") or []
+    items = []
+    for lineno, cells in rows:
+        item = {}
+        for field, cell in zip(fields, cells):
+            if not field or cell_text(cell).lower() in EMPTY_CELLS and field != "status":
+                continue
+            text = cell_text(cell)
+            if field == "id":
+                rid = text.split()[0] if text.split() else ""
+                item["_id"] = (spec["prefix"] + rid) if rid.isdigit() else rid
+            elif field == "status":
+                status, note = normalise_status(cell, rtype, spec)
+                if status:
+                    item["status"] = status
+                if note:
+                    item["status_note"] = note
+                if (rtype in ("tasks", "goals") and status != "blocked"
+                        and re.search(r"block|on hold|waiting", cell_text(cell), re.I)):
+                    item["tags"] = sorted(set(item.get("tags") or []) | {"blocked"})
+            elif field == "priority":
+                value = PRIORITY_WORDS.get(text.lower(), text.lower())
+                item["priority" if value in priorities else "priority_note"] = value
+            elif field == "severity":
+                value = SEVERITY_WORDS.get(text.lower(), text.lower())
+                item["severity" if (not severities or value in severities) else "severity_note"] = value
+            elif field in ("depends_on", "requirements", "tags"):
+                item[field] = cell_ids(cell)
+            elif field in ("task", "testcase", "bug"):
+                ids = cell_ids(cell)
+                if ids:
+                    item[field] = ids[0]
+                if len(ids) > 1:
+                    item["related"] = (item.get("related") or []) + ids[1:]
+            elif field in ("estimate_hours", "actual_hours"):
+                hours = cell_hours(cell)
+                if hours is not None:
+                    item[field] = hours
+            elif field in ("prs", "repos", "evidence", "figma"):
+                item[field] = cell_links(cell)
+            elif field in ("assignee", "owner", "waiting_on"):
+                item[field] = text.lstrip("@")
+            elif field == "kind":
+                item[field] = text.lower()
+            elif field == "fix_commit":
+                links = cell_links(cell)
+                item[field] = links[0] if links else text
+            else:
+                item[field] = text
+        if not item.get("title") and item.get("_id"):
+            item["title"] = item["_id"]
+        if not item.get("title"):
+            continue
+        if rtype == "progress":
+            item["summary"] = item.pop("title")
+        item["source"] = {"file": relpath, "line": lineno}
+        items.append(item)
+    return items
+
+
+def update_from_import(store, rid, item):
+    """Refresh an already imported record from its table row. Returns True when something changed."""
+    rec, scope, rtype, archived, path = store.load(rid)
+    rtype, spec = store.type_spec(rtype)
+    old_status = rec.get("status")
+    changed = False
+    for key, value in item.items():
+        if key.startswith("_") or key == "source" or value in (None, "", []):
+            continue
+        if rec.get(key) != value:
+            rec[key] = value
+            changed = True
+    if changed:
+        record_status_change(store, rec, spec, old_status)
+        rec["updated_at"] = now_iso()
+        problems = store.check_record(rec, rtype, spec)
+        if problems:
+            raise StateError("%s: %s" % (rid, "; ".join(problems)))
+        store.save(rec, scope, rtype, archived)
+    return changed
+
+
 def cmd_import(store, args):
     store.require()
+    forced = store.type_spec(args.type)[0] if args.type else None
     plan = []
     for path in args.files:
         if not os.path.isfile(path):
             raise StateError("%s does not exist" % path)
-        rtype = args.type or guess_type(path)
-        if not rtype:
-            raise StateError("can't tell what %s holds. Pass --type tasks|goals|progress|decisions" % path)
-        rtype, spec = store.type_spec(rtype)
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
         rel = os.path.relpath(os.path.abspath(path), store.root).replace(os.sep, "/")
-        if rtype == "progress":
-            items = parse_progress_markdown(text, rel)
-        elif rtype == "decisions":
-            items = parse_decision_markdown(text, rel, spec)
-        else:
-            items = parse_list_markdown(text, rtype, spec, rel)
-        plan.append((path, rtype, spec, items))
+        file_type = forced or guess_type(path)
+        groups = {}
+        tables = list(find_tables(text))
+        for heading, header, rows in tables:
+            ttype = forced or guess_table_type(heading, header) or file_type
+            if not ttype:
+                continue
+            ttype, tspec = store.type_spec(ttype)
+            groups.setdefault(ttype, []).extend(parse_table(store, header, rows, ttype, tspec, rel))
+        has_checkbox = any(CHECKBOX.match(line) for line in text.splitlines())
+        if file_type and (not tables or (has_checkbox and file_type in ("tasks", "goals"))):
+            ftype, fspec = store.type_spec(file_type)
+            if ftype == "progress":
+                items = parse_progress_markdown(text, rel)
+            elif ftype == "decisions":
+                items = parse_decision_markdown(text, rel, fspec)
+            else:
+                items = parse_list_markdown(text, ftype, fspec, rel)
+                for item in items:
+                    if "_parent_index" in item:
+                        item["_parent"] = items[item.pop("_parent_index")]
+            groups.setdefault(ftype, []).extend(items)
+        if not groups:
+            raise StateError("can't tell what %s holds. Pass --type tasks|goals|progress|decisions|testcases|bugs|"
+                             "requirements|questions" % path)
+        for rtype, items in groups.items():
+            plan.append((path, rtype, store.type_spec(rtype)[1], items))
 
-    existing = {}
+    existing_src, existing_ids = {}, {}
     for rec in store.all_records():
         src = rec.get("source") or {}
-        key = (src.get("file"), (rec.get("title") or rec.get("summary") or "").strip().lower())
-        existing[key] = rec["id"]
+        existing_src[(src.get("file"), (rec.get("title") or rec.get("summary") or "").strip().lower())] = rec["id"]
+        existing_ids[str(rec["id"]).lower()] = rec["id"]
 
-    report = []
-    created = []
+    report, created, updated = [], [], []
     scope = "personal" if args.personal else None
     lock = store.lock() if not args.dry_run else None
     if lock:
         lock.__enter__()
     try:
         for path, rtype, spec, items in plan:
-            new_ids = []
-            skipped = 0
+            skipped = refreshed = 0
             for item in items:
+                rid = item.pop("_id", None)
+                if rid and not ID_RE.match(rid):
+                    rid = None
+                parent = item.pop("_parent", None)
+                if parent is not None and parent.get("_new_id"):
+                    item["parent"] = parent["_new_id"]
                 key = (item["source"]["file"], (item.get("title") or item.get("summary") or "").strip().lower())
-                if key in existing:
-                    skipped += 1
-                    new_ids.append(existing[key])
+                hit = existing_ids.get(rid.lower()) if rid else existing_src.get(key)
+                if hit:
+                    item["_new_id"] = hit
+                    if rid and args.update:
+                        if args.dry_run or update_from_import(store, hit, item):
+                            refreshed += 1
+                            updated.append(hit)
+                        else:
+                            skipped += 1
+                    else:
+                        skipped += 1
                     continue
-                parent_index = item.pop("_parent_index", None)
-                if parent_index is not None and parent_index < len(new_ids) and new_ids[parent_index]:
-                    item["parent"] = new_ids[parent_index]
                 if args.dry_run:
-                    new_ids.append(None)
+                    if rid:
+                        existing_ids[rid.lower()] = rid
+                        item["_new_id"] = rid
                     continue
-                rec, _ = create_record(store, rtype, item, scope)
-                new_ids.append(rec["id"])
+                rec, _ = create_record(store, rtype, item, scope, rid=rid, check=False)
+                item["_new_id"] = rec["id"]
                 created.append(rec["id"])
-                existing[key] = rec["id"]
+                existing_src[key] = rec["id"]
+                existing_ids[rec["id"].lower()] = rec["id"]
+            shown = []
+            for item in items:
+                clean = {k: v for k, v in item.items() if not k.startswith("_")}
+                if item.get("_new_id"):
+                    clean["id"] = item["_new_id"]
+                shown.append(clean)
             report.append({"file": path, "type": rtype, "found": len(items), "skipped": skipped,
-                           "items": items})
+                           "updated": refreshed, "items": shown})
     finally:
         if lock:
             lock.__exit__(None, None, None)
 
     if args.json:
-        print(json.dumps({"dry_run": args.dry_run, "created": created, "files": report}, indent=2,
-                         ensure_ascii=False))
+        print(json.dumps({"dry_run": args.dry_run, "created": created, "updated": updated, "files": report},
+                         indent=2, ensure_ascii=False))
         if not args.dry_run:
             store.build()
         return
     for entry in report:
-        new = entry["found"] - entry["skipped"]
-        print("%s → %d %s (%d new, %d already imported)" % (entry["file"], entry["found"], entry["type"],
-                                                            new, entry["skipped"]))
+        new = entry["found"] - entry["skipped"] - entry["updated"]
+        print("%s → %d %s (%d new, %d updated, %d already imported)" % (
+            entry["file"], entry["found"], entry["type"], new, entry["updated"], entry["skipped"]))
         for item in entry["items"][: args.limit]:
             label = item.get("title") or item.get("summary")
-            extra = [item.get("status"), item.get("priority"), item.get("group"),
+            extra = [item.get("status"), item.get("priority"), item.get("severity"), item.get("slice") or item.get("group"),
+                     ("task " + item["task"]) if item.get("task") else None,
+                     ("after " + ",".join(item["depends_on"])) if item.get("depends_on") else None,
+                     ("%sh" % item["estimate_hours"]) if item.get("estimate_hours") is not None else None,
                      ("#" + " #".join(item["tags"])) if item.get("tags") else None,
                      ("@" + item["assignee"]) if item.get("assignee") else None,
                      ("due " + item["due"]) if item.get("due") else None,
                      (item.get("created_at") or "")[:10] or None]
-            print("   - %s  (%s)" % (label, ", ".join(x for x in extra if x)))
+            print("   - %s%s  (%s)" % ((item["id"] + "  ") if item.get("id") else "", label,
+                                       ", ".join(str(x) for x in extra if x)))
         if len(entry["items"]) > args.limit:
             print("   … and %d more" % (len(entry["items"]) - args.limit))
     if args.dry_run:
         print("\nDry run: nothing was written. Run again without --dry-run to import.")
     else:
         store.build()
-        print("\nImported %d records. The original markdown files were not changed." % len(created))
+        print("\nImported %d new records%s. The original markdown files were not changed." % (
+            len(created), (", refreshed %d" % len(updated)) if updated else ""))
 
 
 def sort_key(rec):
@@ -1425,6 +1951,15 @@ def cmd_export(store, args):
                 lines.append("- %s" % r.get("summary"))
                 for dl in (r.get("details") or "").splitlines():
                     lines.append("  " + (dl if dl.startswith("- ") else "- " + dl))
+        elif spec.get("view") == "table":
+            keys = [k for k in (spec.get("fields") or {}) if any(r.get(k) not in (None, "", []) for r in recs)]
+            head = ["ID", "Title"] + (["Status"] if spec.get("statuses") else []) + [k.replace("_", " ").title() for k in keys]
+            lines += ["", "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+            for r in sorted(recs, key=sort_key):
+                row = [r["id"], r.get("title") or ""] + ([r.get("status") or ""] if spec.get("statuses") else [])
+                row += [", ".join(map(str, r[k])) if isinstance(r.get(k), list) else ("" if r.get(k) is None else r[k])
+                        for k in keys]
+                lines.append("| " + " | ".join(str(c).replace("|", "\\|").replace("\n", " ") for c in row) + " |")
         elif spec.get("statuses"):
             for status in spec["statuses"]:
                 group = [r for r in recs if r.get("status") == status]
@@ -1486,6 +2021,17 @@ def build_parser():
         sp.add_argument("--tags", action="append", help="comma-separated tags")
         sp.add_argument("--depends", action="append", help="comma-separated ids this waits on")
         sp.add_argument("--set", action="append", metavar="KEY=VALUE", help="any other field (repeatable)")
+        sp.add_argument("--add", action="append", metavar="KEY=VALUE",
+                        help="append to a list field: prs, repos, requirements, evidence, figma (repeatable)")
+        sp.add_argument("--task", help="task this test case, bug or question belongs to")
+        sp.add_argument("--result", help="test cases: same as --status (pass, pass_with_question, fail, blocked, not_run)")
+        sp.add_argument("--slice", help="tasks: slice or phase, e.g. A or D2")
+        sp.add_argument("--estimate", type=float, help="tasks: estimated hours")
+        sp.add_argument("--actual", type=float, help="tasks: actual hours so far (use the hours command to add)")
+        sp.add_argument("--severity", help="bugs: low, medium, high or critical")
+        sp.add_argument("--kind", help="test cases: ui, api, ...")
+        sp.add_argument("--owner", help="decisions and questions: who owns it")
+        sp.add_argument("--waiting-on", dest="waiting_on", help="who or what this is waiting on")
         sp.add_argument("--json-data", "--data", dest="json_data", metavar="JSON",
                         help="a JSON object of fields, a path to one, or - for stdin")
         if creating:
@@ -1494,7 +2040,9 @@ def build_parser():
             g.add_argument("--team", action="store_true", help="share it with the team (committed)")
 
     sp = cmd("add", cmd_add, "add a record: add tasks --title ...")
-    sp.add_argument("type", help="tasks, goals, progress, decisions, reviews, notes or a custom type")
+    sp.add_argument("type", help="tasks, goals, progress, decisions, testcases, bugs, requirements, questions, "
+                                 "reviews, notes or a custom type")
+    sp.add_argument("--id", help="use this id (e.g. T001, MSG-01) instead of a generated one")
     record_opts(sp, True)
 
     sp = cmd("update", cmd_update, "change fields of a record")
@@ -1509,7 +2057,13 @@ def build_parser():
         sp = cmd(name, cmd_set_status(status), text)
         sp.add_argument("id")
 
+    sp = cmd("hours", cmd_hours, "add actual hours to a task: hours T001 2.5")
+    sp.add_argument("id")
+    sp.add_argument("hours", type=float)
+    sp.add_argument("--note")
+
     sp = cmd("log", cmd_log, "add a progress entry for this session")
+    sp.add_argument("--hours", type=float, help="hours spent; booked on the task when exactly one is named")
     sp.add_argument("summary")
     sp.add_argument("--details")
     sp.add_argument("--tasks", action="append", help="task ids this work touched")
@@ -1581,10 +2135,12 @@ def build_parser():
     sp.add_argument("--into", help="branch to treat as merged into (default: the repo's default branch)")
     sp.add_argument("--dry-run", action="store_true")
 
-    sp = cmd("import", cmd_import, "import tasks.md, progress.md, goals.md or ADR files")
+    sp = cmd("import", cmd_import, "import markdown: task lists, tables of tasks, tests, bugs, decisions, ADRs")
     sp.add_argument("files", nargs="+")
     sp.add_argument("--type", help="force the type instead of guessing from the file name")
     sp.add_argument("--dry-run", action="store_true", help="show what would be created, write nothing")
+    sp.add_argument("--update", action="store_true",
+                    help="refresh records that already exist from table rows with the same id")
     sp.add_argument("--personal", action="store_true")
     sp.add_argument("--limit", type=int, default=25, help="items to preview per file")
 

@@ -96,6 +96,45 @@ dialog::backdrop{background:rgba(10,12,16,.45)}
 .section-title{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);font-weight:650}
 .welcome{max-width:640px;margin:8vh auto;display:flex;flex-direction:column;gap:16px}
 .welcome pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-family:var(--mono);font-size:12px}
+.tbar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--line2);gap:1px;width:100%}
+.tbar i{display:block;background:var(--text3);opacity:.4}
+.tbar .r-pass,.sq.r-pass{background:var(--ok);opacity:1}
+.tbar .r-pass_with_question,.sq.r-pass_with_question{background:repeating-linear-gradient(135deg,var(--ok) 0 3px,var(--ok-soft) 3px 6px);opacity:1}
+.tbar .r-fail,.sq.r-fail{background:var(--bad);opacity:1}
+.tbar .r-blocked,.sq.r-blocked{background:var(--warn);opacity:1}
+.sq{all:unset;display:inline-block;width:16px;height:16px;border-radius:4px;background:var(--line);vertical-align:middle;margin:1px}
+button.sq{cursor:pointer}
+.sq:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sq.r-not_run{background:transparent;box-shadow:inset 0 0 0 1.5px var(--text3)}
+.hbar{position:relative;height:8px;border-radius:4px;background:var(--line2);overflow:hidden;min-width:90px}
+.hbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:4px}
+.hbar i.over{background:var(--bad)}
+.thumbs{display:flex;flex-wrap:wrap;gap:10px}
+.thumb{display:flex;flex-direction:column;gap:4px;width:150px;text-decoration:none;color:var(--text2);font-size:11px;overflow-wrap:anywhere}
+.thumb img{width:150px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--line2)}
+.thumb.missing img{display:none}
+.gwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
+.gnode{cursor:pointer}
+.gnode rect{fill:var(--panel2);stroke:var(--line);stroke-width:1.2}
+.gnode.s-done rect{fill:var(--ok-soft);stroke:var(--ok)}
+.gnode.s-doing rect{fill:var(--accent-soft);stroke:var(--accent-fg)}
+.gnode.s-blocked rect{fill:var(--bad-soft);stroke:var(--bad)}
+.gnode.crit rect{stroke-width:3;stroke:var(--text)}
+.gnode:focus{outline:none}
+.gnode:focus-visible rect{stroke:var(--accent);stroke-width:3}
+.gnode text{font:12px var(--sans);fill:var(--text)}
+.gnode .gid{font:11px var(--mono);fill:var(--text2)}
+.gnode .gst{font:10px var(--sans);fill:var(--text2);text-anchor:end}
+.edge{fill:none;stroke:var(--text3);stroke-width:1.2;opacity:.6}
+.edge.crit{stroke:var(--text);stroke-width:2.6;opacity:1}
+.trow{all:unset;box-sizing:border-box;display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line2);cursor:pointer;width:100%}
+.trow:hover{background:var(--panel2)}
+.trow:focus-visible{outline:2px solid var(--accent)}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px;box-shadow:inset 0 0 0 1.5px var(--text3)}
+.dot.s-done{background:var(--ok);box-shadow:none}
+.dot.s-doing{background:var(--accent);box-shadow:none}
+.dot.s-blocked{background:var(--bad);box-shadow:none}
+td .linkish{text-decoration:none}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (max-width:820px){.side{border-right:0;border-bottom:1px solid var(--line)}.main{padding:18px}}
 </style>
@@ -117,11 +156,18 @@ var BUILTIN = {
   tasks:{prefix:"T",label:"Tasks",view:"board",scope:"team",statuses:["todo","doing","done"],done:["done"]},
   goals:{prefix:"G",label:"Goals",view:"cards",scope:"team",statuses:["active","achieved","dropped"],done:["achieved"]},
   progress:{prefix:"P",label:"Progress",view:"timeline",scope:"team",statuses:[],done:[]},
-  decisions:{prefix:"D",label:"Architecture",view:"cards",scope:"team",statuses:["proposed","accepted","superseded","rejected"],done:["accepted"]},
+  decisions:{prefix:"D",label:"Decisions",view:"cards",scope:"team",statuses:["proposed","accepted","superseded","rejected"],done:["accepted"]},
+  testcases:{prefix:"TC",label:"Tests",view:"table",scope:"team",statuses:["not_run","pass","pass_with_question","fail","blocked"],done:["pass","pass_with_question"]},
+  bugs:{prefix:"B",label:"Bugs",view:"table",scope:"team",statuses:["open","fixing","fixed","wontfix"],done:["fixed","wontfix"]},
+  requirements:{prefix:"REQ",label:"Requirements",view:"table",scope:"team",statuses:[],done:[]},
+  questions:{prefix:"Q",label:"Open questions",view:"table",scope:"team",statuses:["open","answered"],done:["answered"]},
   reviews:{prefix:"R",label:"Code reviews",view:"list",scope:"personal",statuses:["open","closed"],done:["closed"]},
   notes:{prefix:"N",label:"Notes",view:"list",scope:"personal",statuses:[],done:[]}
 };
-var ORDER = ["overview","tasks","goals","progress","reviews","decisions","notes"];
+var ORDER = ["overview","tasks","goals","progress","testcases","bugs","trace","reviews","decisions","evidence","notes"];
+var PAGE_LABELS = {overview:"Overview", trace:"Traceability", evidence:"Evidence", decisions:"Decisions"};
+var EMBEDDED = {requirements:1, questions:1};
+var RES = ["pass","pass_with_question","fail","blocked","not_run"];
 var SEV = {blocking:"dark",major:"warn",minor:"",note:""};
 var SEV_ORDER = ["blocking","major","minor","note"];
 
@@ -162,6 +208,106 @@ function md(text){
 }
 function safeColor(c, dflt){ return /^#[0-9a-f]{3,8}$/i.test(c || "") ? c : dflt; }
 function label(r){ return r.title || r.summary || r.id; }
+function low(x){ return String(x == null ? "" : x).toLowerCase(); }
+function push(map, k, v){ (map[k] = map[k] || []).push(v); }
+function natural(a, b){ return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:"base"}); }
+function byId(a, b){ return natural(a.id, b.id); }
+function trunc(s, n){ s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+function hrs(n){ return n == null ? "–" : (Math.round(n * 10) / 10) + " h"; }
+function sum(list, key){ var t = 0, any = false; list.forEach(function(x){ if (typeof x[key] === "number"){ t += x[key]; any = true; } }); return any ? t : null; }
+function resLabel(v){ return String(v == null ? "" : v).replace(/_/g, " "); }
+function sec(title, body){ return '<section><div class="section-title">' + title + '</div><div style="margin-top:8px">' + body + "</div></section>"; }
+function safeHref(u){
+  u = String(u || "");
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[\w.()\- \/]+$/.test(u) && u.charAt(0) !== "/" && u.indexOf("..") < 0) return "../" + encodeURI(u);
+  return null;
+}
+function isImg(u){ return /\.(png|jpe?g|gif|webp|svg)$/i.test(String(u).replace(/[?#].*$/, "")); }
+function shortUrl(u){ u = String(u).replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/$/, ""); return trunc(u, 48); }
+function linkOut(u, text){
+  var h = safeHref(u);
+  return h ? '<a href="' + esc(h) + '" target="_blank" rel="noopener noreferrer">' + esc(text || shortUrl(u)) + "</a>" : '<span class="mono">' + esc(text || u) + "</span>";
+}
+function webBase(){ return (D.git || {}).web || ""; }
+function prLink(p){
+  p = String(p); var web = webBase(), m;
+  if (/^https?:/i.test(p)){ m = p.match(/\/(?:pull|merge_requests)\/(\d+)/); return linkOut(p, m ? "#" + m[1] : null); }
+  m = p.match(/^([\w.-]+\/[\w.-]+)?[#!]?(\d+)$/);
+  if (m && /github\.com/.test(web)) return linkOut(m[1] ? "https://github.com/" + m[1] + "/pull/" + m[2] : web + "/pull/" + m[2], (m[1] || "") + "#" + m[2]);
+  if (m && !m[1] && /gitlab/.test(web)) return linkOut(web + "/-/merge_requests/" + m[2], "!" + m[2]);
+  return '<span class="mono">' + esc(p) + "</span>";
+}
+function commitLink(c){
+  c = String(c); var m = c.match(/[0-9a-f]{7,40}/i);
+  if (/^https?:/i.test(c)) return linkOut(c, m ? m[0].slice(0, 7) : null);
+  if (webBase() && /^[0-9a-f]{7,40}$/i.test(c)) return linkOut(webBase() + "/commit/" + c, c.slice(0, 7));
+  return '<span class="mono">' + esc(c) + "</span>";
+}
+function repoLink(r){
+  r = String(r);
+  if (/^https?:/i.test(r)) return linkOut(r);
+  if (/^[\w.-]+\/[\w.-]+$/.test(r) && /github\.com/.test(webBase())) return linkOut("https://github.com/" + r, r);
+  return '<span class="mono">' + esc(r) + "</span>";
+}
+function evidenceFor(r){
+  var list = (M.evidence[low(r.id)] || []).map(function(e){ return {path:e.path, label:e.label}; });
+  (r.evidence || []).forEach(function(u){
+    u = String(u);
+    if (!list.some(function(e){ return e.path === u; })) list.push({path:u, label:/before/i.test(u) ? "before" : /after/i.test(u) ? "after" : ""});
+  });
+  var rank = {before:0, after:1, "":2};
+  return list.sort(function(a, b){ return rank[a.label] - rank[b.label] || natural(a.path, b.path); });
+}
+function thumbs(list){
+  return '<div class="thumbs">' + list.map(function(e){
+    var h = safeHref(e.path), name = e.path.split("/").pop();
+    if (!h) return "";
+    if (!isImg(e.path)) return "<span>" + linkOut(e.path, name) + "</span>";
+    return '<a class="thumb" href="' + esc(h) + '" target="_blank" rel="noopener noreferrer"><img loading="lazy" src="' + esc(h) + '" alt="' + esc(name) + '" onerror="this.parentNode.classList.add(\'missing\')">' +
+      "<span>" + (e.label ? '<span class="pill">' + esc(e.label) + "</span> " : "") + esc(name) + "</span></a>";
+  }).join("") + "</div>";
+}
+function taskState(t){
+  if (isDone(t)) return "done";
+  if (/block/.test(t.status || "") || (t.tags || []).indexOf("blocked") >= 0) return "blocked";
+  return t.status === ((M.types[t._type] || {}).statuses || [])[0] ? "todo" : "doing";
+}
+function depsOpen(t){ return (t.depends_on || []).map(get).filter(function(x){ return x && !isDone(x); }); }
+function isReady(t){ return taskState(t) === "todo" && !depsOpen(t).length; }
+function testCounts(tests){ var c = {}; tests.forEach(function(t){ c[t.status] = (c[t.status] || 0) + 1; }); return c; }
+function testBar(tests){
+  if (!tests.length) return "";
+  var c = testCounts(tests);
+  var keys = RES.filter(function(k){ return c[k]; }).concat(Object.keys(c).filter(function(k){ return RES.indexOf(k) < 0; }));
+  var text = keys.map(function(k){ return c[k] + " " + resLabel(k); }).join(", ");
+  return '<span class="tbar" role="img" aria-label="Tests: ' + esc(text) + '" title="' + esc(text) + '">' +
+    keys.map(function(k){ return '<i class="r-' + esc(k) + '" style="flex:' + c[k] + '"></i>'; }).join("") + "</span>";
+}
+function testSquares(tests){
+  return tests.slice().sort(byId).map(function(t){
+    var text = t.id + " · " + resLabel(t.status) + " · " + t.title;
+    return '<button class="sq r-' + esc(t.status) + '" data-open="' + esc(t.id) + '" title="' + esc(text) + '" aria-label="' + esc(text) + '"></button>';
+  }).join("");
+}
+function hourBar(est, act){
+  if (!est) return "";
+  var p = Math.min(100, Math.round(100 * (act || 0) / est));
+  return '<div class="hbar" role="img" aria-label="' + hrs(act || 0) + " of " + hrs(est) + '" title="' + hrs(act || 0) + " of " + hrs(est) + '"><i class="' + ((act || 0) > est ? "over" : "") + '" style="width:' + p + '%"></i></div>';
+}
+function diffCell(est, act){
+  if (est == null || act == null) return "";
+  var d = act - est;
+  if (!d) return '<span class="muted">on estimate</span>';
+  return '<span style="color:var(--' + (d > 0 ? "bad" : "ok") + ')">' + hrs(Math.abs(d)) + (d > 0 ? " over" : " under") + "</span>";
+}
+function reqChip(id){
+  var r = get(id);
+  if (r && r._type === "requirements") return '<button class="pill accent" style="border:0;cursor:pointer" data-open="' + esc(r.id) + '" title="' + esc(r.title) + '">' + esc(r.id) + "</button>";
+  return '<span class="pill">' + esc(id) + "</span>";
+}
+function sevPill(v){ return v ? '<span class="pill ' + (v === "critical" ? "dark" : v === "high" ? "warn" : "") + '">' + esc(v) + "</span>" : ""; }
+function pageLabel(p){ return PAGE_LABELS[p] || (M.types[p] || {}).label || titleCase(p); }
 
 /* ---------- data model ---------- */
 var M = {};
@@ -178,6 +324,13 @@ function prepare(){
   M.byId = {};
   D.records.forEach(function(r){ M.byId[String(r.id).toLowerCase()] = r; });
   M.hidden = (cfg.hidden || []);
+  M.testsByTask = {}; M.bugsByTask = {}; M.evidence = {};
+  D.records.forEach(function(r){
+    if (r._archived || !r.task) return;
+    if (r._type === "testcases") push(M.testsByTask, low(r.task), r);
+    if (r._type === "bugs") push(M.bugsByTask, low(r.task), r);
+  });
+  (D.evidence || []).forEach(function(e){ (e.ids || []).forEach(function(id){ push(M.evidence, low(id), e); }); });
   var me = (D.git && D.git.me) || {};
   M.me = [me.email, me.name].filter(Boolean);
   document.documentElement.style.setProperty("--accent", safeColor((cfg.project||{}).accent, "#2563EB"));
@@ -218,10 +371,11 @@ function reviewState(r){
 function statusPill(r){
   if (!r.status) return "";
   var t = M.types[r._type] || {}, cls = "";
-  if ((t.done || []).indexOf(r.status) >= 0) cls = "ok";
-  else if (/block|reject|drop/.test(r.status)) cls = "bad";
+  if (/fail|reject|drop/.test(r.status)) cls = "bad";
+  else if (/block/.test(r.status)) cls = r._type === "testcases" ? "warn" : "bad";
+  else if ((t.done || []).indexOf(r.status) >= 0) cls = "ok";
   else if ((t.statuses || [])[0] !== r.status) cls = "accent";
-  return '<span class="pill ' + cls + '">' + esc(r.status) + "</span>";
+  return '<span class="pill ' + cls + '">' + esc(resLabel(r.status)) + "</span>";
 }
 function prioPill(r){
   if (!r.priority) return "";
@@ -239,17 +393,27 @@ function empty(text){ return '<div class="empty">' + text + "</div>"; }
 function taskCard(t){
   var meta = [];
   if (t.assignee) meta.push("@" + esc(t.assignee));
+  if (t.slice) meta.push("slice " + esc(t.slice));
   var g = get(t.goal); if (g) meta.push(esc(g.title));
-  if ((t.depends_on || []).length){
-    var waiting = t.depends_on.map(get).filter(function(x){ return x && !isDone(x); }).length;
-    if (waiting) meta.push("waits on " + waiting);
-  }
+  var waiting = depsOpen(t).length;
+  if (waiting) meta.push("waits on " + waiting);
   if (t.due) meta.push("due " + esc(t.due));
+  if (t.estimate_hours != null || t.actual_hours != null) meta.push(t.actual_hours != null ? hrs(t.actual_hours) + " of " + hrs(t.estimate_hours) : "est " + hrs(t.estimate_hours));
+  var tests = M.testsByTask[low(t.id)] || [], bugs = M.bugsByTask[low(t.id)] || [];
+  var openBugs = bugs.filter(function(b){ return !isDone(b); }).length, qa = "";
+  if (tests.length) qa += '<span class="row" style="flex-wrap:nowrap;gap:8px">' + testBar(tests) + '<span class="small muted" style="white-space:nowrap">' + tests.filter(isDone).length + "/" + tests.length + " pass</span></span>";
+  if (bugs.length) qa += '<span class="row">' + (openBugs ? '<span class="pill bad">' + openBugs + " open bug" + (openBugs > 1 ? "s" : "") + "</span>" : "") +
+    (bugs.length - openBugs ? '<span class="pill">' + (bugs.length - openBugs) + " fixed</span>" : "") + "</span>";
   return '<button class="card" data-open="' + esc(t.id) + '">' +
     '<span class="row between"><span class="mono muted">' + esc(t.id) + '</span><span class="row">' + privatePill(t) + prioPill(t) + "</span></span>" +
     '<span class="title">' + esc(t.title) + "</span>" +
-    (meta.length ? '<span class="small muted">' + meta.join(" · ") + "</span>" : "") +
+    (meta.length ? '<span class="small muted">' + meta.join(" · ") + "</span>" : "") + qa +
     ((t.tags||[]).length ? '<span class="row">' + tagPills(t) + "</span>" : "") + "</button>";
+}
+function taskRow(t){
+  var st = taskState(t), note = isReady(t) ? "ready" : st === "todo" ? "waits on " + depsOpen(t).map(function(x){ return x.id; }).join(", ") : resLabel(st === "blocked" ? "blocked" : t.status);
+  return '<button class="trow" data-open="' + esc(t.id) + '"><span class="dot s-' + st + '"></span><span class="mono muted">' + esc(t.id) + "</span>" +
+    '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(t.title) + '</span><span class="small muted" style="white-space:nowrap">' + esc(note) + "</span></button>";
 }
 
 /* ---------- views ---------- */
@@ -265,11 +429,19 @@ views.overview = function(){
   var proposed = recs("decisions").filter(function(d){ return d.status === "proposed"; });
   var progress = recs("progress").sort(byCreated).reverse().slice(0, 6);
   var doing = tasks.filter(function(t){ return !isDone(t) && t.status !== (M.types.tasks.statuses || [])[0]; });
-  var h = '<div class="grid fit" style="--min:180px">' +
-    tile("Tasks done", done + " <small>of " + tasks.length + "</small>") +
-    tile("Active goals", goals.length) +
-    tile("Open review findings", findings.length + (blocking.length ? ' <small style="color:var(--bad)">' + blocking.length + " blocking</small>" : "")) +
-    tile("Decisions to make", proposed.length) + "</div>";
+  var tests = recs("testcases"), bugs = recs("bugs"), openBugs = bugs.filter(function(b){ return !isDone(b); });
+  var est = sum(tasks, "estimate_hours"), act = sum(tasks, "actual_hours");
+  var tiles = [tile("Tasks done", done + " <small>of " + tasks.length + "</small>")];
+  if (recs("goals").length) tiles.push(tile("Active goals", goals.length));
+  if (tests.length) tiles.push(tile("Tests passing", tests.filter(isDone).length + " <small>of " + tests.length + "</small>"));
+  if (bugs.length){
+    var severe = openBugs.filter(function(b){ return b.severity === "critical" || b.severity === "high"; }).length;
+    tiles.push(tile("Open bugs", openBugs.length + (severe ? ' <small style="color:var(--bad)">' + severe + " high or critical</small>" : "")));
+  }
+  if (est != null) tiles.push(tile("Hours", hrs(act || 0) + " <small>of " + hrs(est) + " est</small>"));
+  if (reviews.length || !tests.length) tiles.push(tile("Open review findings", findings.length + (blocking.length ? ' <small style="color:var(--bad)">' + blocking.length + " blocking</small>" : "")));
+  if (recs("decisions").length || !tests.length) tiles.push(tile("Decisions to make", proposed.length));
+  var h = '<div class="grid fit" style="--min:180px">' + tiles.join("") + "</div>";
   h += '<div class="grid fit" style="--min:340px">';
   h += '<section class="panel"><h3>Goals <a class="small" href="#/goals">All goals</a></h3>' +
     (goals.length ? goals.map(goalRow).join("") : '<p class="muted small">No active goals.</p>') + "</section>";
@@ -281,6 +453,10 @@ views.overview = function(){
   h += "</div>";
   h += '<div class="grid fit" style="--min:340px">';
   h += '<section class="panel"><h3>In progress</h3>' + (doing.length ? '<div style="display:flex;flex-direction:column;gap:8px">' + doing.slice(0, 8).map(taskCard).join("") + "</div>" : '<p class="muted small">Nothing in progress.</p>') + "</section>";
+  if (tasks.some(function(t){ return (t.depends_on || []).length; })){
+    var ready = tasks.filter(isReady).sort(byId);
+    h += '<section class="panel"><h3>Ready to start <a class="small" href="#/tasks">' + ready.length + ' ready</a></h3>' + (ready.length ? ready.slice(0, 8).map(taskRow).join("") : '<p class="muted small">Every unstarted task waits on another.</p>') + "</section>";
+  }
   var top = findings.sort(function(a, b){ return SEV_ORDER.indexOf(a.f.severity) - SEV_ORDER.indexOf(b.f.severity); }).slice(0, 6);
   h += '<section class="panel"><h3>Open findings <a class="small" href="#/reviews">All reviews</a></h3>' + (top.length ? top.map(function(x){
     return '<div class="entry"><span class="pill ' + (SEV[x.f.severity]||"") + '" style="align-self:flex-start">' + esc(x.f.severity) + '</span><div><button class="linkish" style="color:var(--text);text-decoration:none" data-open="' + esc(x.r.id) + '">' + esc(x.f.title) + '</button><div class="mono muted">' + esc(x.f.file || "") + (x.f.line ? ":" + esc(x.f.line) : "") + "</div></div></div>";
@@ -299,25 +475,37 @@ function goalRow(g){
 views.tasks = function(){ return listOrBoard("tasks"); };
 
 function listOrBoard(type){
-  var t = M.types[type], items = recs(type).sort(byCreated);
-  var tags = {}, people = {};
-  items.forEach(function(r){ (r.tags||[]).forEach(function(x){ tags[x] = 1; }); if (r.assignee) people[r.assignee] = 1; });
+  var t = M.types[type], all = recs(type).sort(byCreated), items = all;
+  var tags = {}, people = {}, slices = {};
+  items.forEach(function(r){ (r.tags||[]).forEach(function(x){ tags[x] = 1; }); if (r.assignee) people[r.assignee] = 1; if (r.slice) slices[r.slice] = 1; });
   var f = ui.filters && ui.filters[type] || {};
   items = items.filter(function(r){
     if (f.tag && (r.tags || []).indexOf(f.tag) < 0) return false;
     if (f.who === "__me" ? M.me.indexOf(r.assignee) < 0 && M.me.indexOf(r.author) < 0 : (f.who && r.assignee !== f.who)) return false;
     if (f.prio && r.priority !== f.prio) return false;
+    if (f.slice && r.slice !== f.slice) return false;
     return true;
   });
   var hasStatus = (t.statuses || []).length > 0;
-  var view = hasStatus ? (ui.views && ui.views[type]) || (t.view === "table" ? "list" : "board") : "list";
+  var modes = hasStatus ? ["board", "list"] : ["list"];
+  if (type === "tasks"){
+    if (Object.keys(slices).length) modes.push("slices");
+    if (all.some(function(r){ return (r.depends_on || []).length; })) modes.push("graph");
+    if (all.some(function(r){ return r.estimate_hours != null || r.actual_hours != null; })) modes.push("hours");
+  }
+  var view = (ui.views && ui.views[type]) || (t.view === "table" ? "list" : modes[0]);
+  if (modes.indexOf(view) < 0) view = modes[0];
   var h = '<div class="row between"><div class="row">';
-  if (hasStatus) h += '<div class="seg" role="group" aria-label="Layout">' + ["board","list"].map(function(v){ return '<button data-view="' + type + ":" + v + '" aria-pressed="' + (view === v) + '">' + titleCase(v) + "</button>"; }).join("") + "</div>";
-  h += filterSelect(type, "tag", "All tags", Object.keys(tags).sort().map(function(x){ return [x, "#" + x]; }));
+  if (modes.length > 1) h += '<div class="seg" role="group" aria-label="Layout">' + modes.map(function(v){ return '<button data-view="' + type + ":" + v + '" aria-pressed="' + (view === v) + '">' + titleCase(v) + "</button>"; }).join("") + "</div>";
+  if (Object.keys(slices).length) h += filterSelect(type, "slice", "All slices", Object.keys(slices).sort(natural).map(function(x){ return [x, "Slice " + x]; }));
+  if (Object.keys(tags).length) h += filterSelect(type, "tag", "All tags", Object.keys(tags).sort().map(function(x){ return [x, "#" + x]; }));
   h += filterSelect(type, "who", "Anyone", [["__me","Me"]].concat(Object.keys(people).sort().map(function(x){ return [x, "@" + x]; })));
   if (items.some(function(r){ return r.priority; }) || f.prio) h += filterSelect(type, "prio", "Any priority", (D.config.priorities || []).map(function(x){ return [x, x]; }));
   h += '</div><span class="small muted">' + items.length + " shown</span></div>";
   if (!items.length) return h + empty("Nothing here yet. Agents add items with <code>repostate.py add " + esc(type) + " --title …</code>");
+  if (view === "slices") return h + slicesView(items);
+  if (view === "graph") return h + graphView(items);
+  if (view === "hours") return h + hoursView(items);
   if (view === "board"){
     h += '<div class="board">' + t.statuses.map(function(s){
       var col = items.filter(function(r){ return r.status === s; });
@@ -327,15 +515,125 @@ function listOrBoard(type){
     if (orphans.length) h += '<p class="small muted">' + orphans.length + " item(s) have a status not in config.json: " + orphans.map(function(r){ return esc(r.id); }).join(", ") + "</p>";
     return h;
   }
-  var fields = Object.keys(t.fields || {});
+  function used(k){ return items.some(function(r){ return r[k] != null && r[k] !== "" && !(Array.isArray(r[k]) && !r[k].length); }); }
   var cols = [["id","ID"],["title","Title"]];
   if (hasStatus) cols.push(["status","Status"]);
-  if (items.some(function(r){ return r.priority; })) cols.push(["priority","Priority"]);
-  if (items.some(function(r){ return r.assignee; })) cols.push(["assignee","Assignee"]);
-  if (type === "tasks") cols.push(["goal","Goal"], ["depends_on","Waits on"]);
-  fields.forEach(function(k){ cols.push([k, titleCase(k)]); });
+  ["priority","assignee","goal","depends_on"].forEach(function(k){ if (used(k)) cols.push([k, k === "depends_on" ? "Waits on" : titleCase(k)]); });
+  Object.keys(t.fields || {}).forEach(function(k){
+    if (used(k) && ["evidence","figma","repos"].indexOf(k) < 0 && !cols.some(function(c){ return c[0] === k; })) cols.push([k, k === "estimate_hours" ? "Est" : k === "actual_hours" ? "Actual" : titleCase(k)]);
+  });
   cols.push(["updated_at","Updated"]);
   return h + table(type, items, cols);
+}
+function slicesView(items){
+  var ready = items.filter(isReady).sort(byId), names = D.config.slices || {}, groups = {};
+  items.forEach(function(t){ push(groups, t.slice || "", t); });
+  var h = '<section class="panel"><h3>Ready to start <span class="small muted" style="font-weight:400">' + ready.length + " not started, with every dependency done</span></h3>" +
+    (ready.length ? '<div class="grid" style="--min:240px">' + ready.slice(0, 12).map(taskCard).join("") + "</div>" + (ready.length > 12 ? '<p class="small muted" style="margin-top:8px">and ' + (ready.length - 12) + " more</p>" : "")
+      : '<p class="muted small">Nothing is ready: every unstarted task waits on another, or is blocked.</p>') + "</section>";
+  return h + '<div class="grid" style="--min:360px">' + Object.keys(groups).sort(function(a, b){ return (!a - !b) || natural(a, b); }).map(function(name){
+    var list = groups[name].slice().sort(byId), done = list.filter(isDone).length;
+    var est = sum(list, "estimate_hours"), act = sum(list, "actual_hours"), tests = [];
+    list.forEach(function(t){ tests = tests.concat(M.testsByTask[low(t.id)] || []); });
+    var facts = [];
+    if (est != null || act != null) facts.push(hrs(act || 0) + " of " + hrs(est) + " est");
+    if (tests.length) facts.push(tests.filter(isDone).length + "/" + tests.length + " tests pass");
+    return '<section class="panel"><h3><span>' + (name ? "Slice " + esc(name) : "No slice") + (names[name] ? ' <span class="muted" style="font-weight:400">' + esc(names[name]) + "</span>" : "") +
+      '</span><span class="small muted" style="font-weight:400">' + done + " of " + list.length + " done</span></h3>" +
+      '<div class="bar"><i style="width:' + Math.round(100 * done / list.length) + '%"></i></div>' +
+      (facts.length ? '<div class="small muted" style="margin:8px 0 2px">' + facts.join(" · ") + "</div>" : '<div style="height:8px"></div>') +
+      (tests.length ? '<div style="margin:6px 0 8px">' + testBar(tests) + "</div>" : "") + list.map(taskRow).join("") + "</section>";
+  }).join("") + "</div>";
+}
+function hoursView(items){
+  var finished = items.filter(function(t){ return isDone(t) && t.estimate_hours != null && t.actual_hours != null; });
+  var est = sum(items, "estimate_hours"), act = sum(items, "actual_hours"), fEst = sum(finished, "estimate_hours"), fAct = sum(finished, "actual_hours");
+  var left = sum(items.filter(function(t){ return !isDone(t); }), "estimate_hours");
+  var h = '<div class="grid fit" style="--min:200px">' + tile("Estimated", hrs(est)) + tile("Actual so far", hrs(act || 0)) + tile("Estimate left (unfinished tasks)", hrs(left || 0)) +
+    tile("Finished tasks", fEst ? hrs(fAct) + " <small>against " + hrs(fEst) + " est (" + (fAct >= fEst ? "+" : "−") + Math.abs(Math.round(100 * (fAct - fEst) / fEst)) + "%)</small>" : "–") + "</div>";
+  var groups = {};
+  items.forEach(function(t){ push(groups, t.slice || "", t); });
+  var names = Object.keys(groups).sort(function(a, b){ return (!a - !b) || natural(a, b); });
+  if (names.length > 1 || names[0]){
+    h += '<div class="table-wrap"><table><thead><tr><th>Slice</th><th>Tasks done</th><th>Estimate</th><th>Actual</th><th>Finished tasks: est → actual</th><th>Used</th></tr></thead><tbody>' + names.map(function(n){
+      var list = groups[n], fin = list.filter(function(t){ return isDone(t) && t.estimate_hours != null && t.actual_hours != null; });
+      var e = sum(list, "estimate_hours"), a = sum(list, "actual_hours"), fe = sum(fin, "estimate_hours"), fa = sum(fin, "actual_hours");
+      return '<tr style="cursor:default"><td>' + (n ? "Slice " + esc(n) : '<span class="muted">No slice</span>') + "</td><td>" + list.filter(isDone).length + " of " + list.length + "</td><td>" + hrs(e) + "</td><td>" + hrs(a) + "</td><td>" +
+        (fe != null ? hrs(fe) + " → " + hrs(fa) + " " + diffCell(fe, fa) : '<span class="muted">none finished</span>') + '</td><td style="min-width:120px">' + hourBar(e, a) + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
+  }
+  var rows = items.filter(function(t){ return t.estimate_hours != null || t.actual_hours != null; }).sort(byId);
+  h += '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Task</th><th>Slice</th><th>Status</th><th>Estimate</th><th>Actual</th><th>Difference</th><th>Used</th></tr></thead><tbody>' + rows.map(function(t){
+    return '<tr data-open="' + esc(t.id) + '" tabindex="0"><td class="mono">' + esc(t.id) + "</td><td>" + esc(t.title) + "</td><td>" + esc(t.slice || "") + "</td><td>" + statusPill(t) + "</td><td>" + hrs(t.estimate_hours) + "</td><td>" + hrs(t.actual_hours) +
+      "</td><td>" + (isDone(t) ? diffCell(t.estimate_hours, t.actual_hours) : "") + '</td><td style="min-width:120px">' + hourBar(t.estimate_hours, t.actual_hours) + "</td></tr>";
+  }).join("") + "</tbody></table></div>";
+  var none = items.length - rows.length;
+  return h + (none ? '<p class="small muted">' + none + " task(s) have no hours yet.</p>" : "");
+}
+function graphView(items){
+  var by = {}, deps = {}, kids = {};
+  items.forEach(function(t){ by[low(t.id)] = t; });
+  Object.keys(by).forEach(function(id){
+    deps[id] = (by[id].depends_on || []).map(low).filter(function(d){ return by[d] && d !== id; });
+    deps[id].forEach(function(d){ push(kids, d, id); });
+  });
+  var linked = Object.keys(by).filter(function(id){ return deps[id].length || (kids[id] || []).length; });
+  if (!linked.length) return empty("No task here depends on another. Add a link with <code>repostate.py update T002 --add-depends T001</code>.");
+  var level = {}, busy = {};
+  function lv(id){
+    if (level[id] != null) return level[id];
+    if (busy[id]) return 0;
+    busy[id] = 1; var m = 0;
+    deps[id].forEach(function(d){ m = Math.max(m, lv(d) + 1); });
+    busy[id] = 0; return (level[id] = m);
+  }
+  linked.forEach(lv);
+  function weight(id){ var t = by[id]; return isDone(t) ? 0 : (typeof t.estimate_hours === "number" && t.estimate_hours > 0 ? t.estimate_hours : 1); }
+  var best = {}, prev = {}, usesHours = linked.some(function(id){ return typeof by[id].estimate_hours === "number"; });
+  linked.slice().sort(function(a, b){ return level[a] - level[b]; }).forEach(function(id){
+    var m = 0, p = null;
+    deps[id].forEach(function(d){ if ((best[d] || 0) > m){ m = best[d]; p = d; } });
+    best[id] = m + weight(id); prev[id] = p;
+  });
+  var end = null;
+  linked.forEach(function(id){ if (best[id] > 0 && (end == null || best[id] > best[end])) end = id; });
+  var crit = {}, chain = [];
+  for (var c = end; c; c = prev[c]){ crit[c] = 1; chain.unshift(by[c].id); }
+  var cols = [], row = {};
+  linked.forEach(function(id){ (cols[level[id]] = cols[level[id]] || []).push(id); });
+  for (var i = 0; i < cols.length; i++){
+    cols[i] = cols[i] || [];
+    cols[i].sort(function(a, b){
+      function avg(ds){ return ds.length ? ds.reduce(function(s2, d){ return s2 + (row[d] || 0); }, 0) / ds.length : 0; }
+      return (i ? avg(deps[a]) - avg(deps[b]) : 0) || natural(a, b);
+    });
+    cols[i].forEach(function(id, j){ row[id] = j; });
+  }
+  var W = 196, H = 46, GX = 54, GY = 12, P = 6;
+  var width = cols.length * (W + GX) - GX + P * 2, height = Math.max.apply(null, cols.map(function(col){ return col.length; })) * (H + GY) - GY + P * 2;
+  function x(id){ return P + level[id] * (W + GX); }
+  function y(id){ return P + row[id] * (H + GY); }
+  var edges = "", nodes = "";
+  linked.forEach(function(id){
+    deps[id].forEach(function(d){
+      var x1 = x(d) + W, y1 = y(d) + H / 2, x2 = x(id), y2 = y(id) + H / 2, mid = Math.max(GX / 2, (x2 - x1) / 2);
+      edges += '<path class="edge' + (crit[id] && prev[id] === d ? " crit" : "") + '" d="M' + x1 + " " + y1 + " C" + (x1 + mid) + " " + y1 + "," + (x2 - mid) + " " + y2 + "," + x2 + " " + y2 + '"/>';
+    });
+    var t = by[id], st = taskState(t);
+    nodes += '<g class="gnode s-' + st + (crit[id] ? " crit" : "") + '" data-open="' + esc(t.id) + '" tabindex="0" role="button" aria-label="' + esc(t.id + ": " + t.title + ", " + resLabel(t.status) + (crit[id] ? ", on the critical path" : "")) +
+      '" transform="translate(' + x(id) + "," + y(id) + ')"><rect width="' + W + '" height="' + H + '" rx="8"/><text class="gid" x="10" y="17">' + esc(t.id) + (t.slice ? " · " + esc(t.slice) : "") + '</text><text class="gst" x="' + (W - 10) + '" y="17">' + esc(st === "blocked" ? "blocked" : resLabel(t.status)) +
+      '</text><text x="10" y="35">' + esc(trunc(t.title, 28)) + "</text></g>";
+  });
+  var legend = [["done","Done"],["doing","In progress"],["todo","Not started"],["blocked","Blocked"]].map(function(l){
+    return '<span class="row small" style="gap:5px"><span class="dot s-' + l[0] + '"></span>' + l[1] + "</span>";
+  }).join("") + '<span class="row small" style="gap:5px"><svg width="26" height="8" aria-hidden="true"><path class="edge crit" d="M0 4H26"/></svg>Critical path</span><span class="small muted">A task waits on the tasks to its left.</span>';
+  var alone = items.length - linked.length;
+  return '<section class="panel"><h3>Critical path</h3>' + (chain.length ? '<p class="mono">' + chain.map(esc).join(" → ") + '</p><p class="small muted" style="margin-top:4px">The longest chain of unfinished work: ' +
+      (usesHours ? hrs(best[end]) + " of estimates (tasks without an estimate count as 1 h)" : chain.filter(function(id){ return !isDone(get(id)); }).length + " unfinished tasks in a row") + ".</p>"
+      : '<p class="muted small">Every linked task is done.</p>') + "</section>" +
+    '<div class="row" style="gap:14px">' + legend + "</div>" +
+    '<div class="gwrap"><svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="group" aria-label="Task dependency graph">' + edges + nodes + "</svg></div>" +
+    (alone ? '<p class="small muted">' + alone + " task(s) with no dependency links are not drawn.</p>" : "");
 }
 function filterSelect(type, key, all, options){
   var f = (ui.filters && ui.filters[type]) || {};
@@ -366,6 +664,13 @@ function cell(r, k){
   if (k === "status") return statusPill(r);
   if (k === "priority") return prioPill(r);
   if (k === "goal"){ var g = get(v); return g ? esc(g.title) : esc(v || ""); }
+  if (k === "task" || k === "testcase" || k === "bug") return v ? '<button class="linkish mono" data-open="' + esc(v) + '">' + esc(v) + "</button>" : "";
+  if (k === "severity") return sevPill(v);
+  if (k === "kind") return v ? '<span class="pill">' + esc(String(v).toUpperCase()) + "</span>" : "";
+  if (k === "fix_commit") return v ? commitLink(v) : "";
+  if (k === "prs") return (v || []).map(prLink).join(" ");
+  if (k === "requirements") return (v || []).map(reqChip).join(" ");
+  if (k === "estimate_hours" || k === "actual_hours") return v == null ? "" : hrs(v);
   if (k === "depends_on") return (v || []).map(function(id){ var x = get(id); return '<span class="mono ' + (x && isDone(x) ? "muted" : "") + '">' + esc(id) + "</span>"; }).join(" ");
   if (k === "updated_at" || k === "created_at") return '<span class="small muted">' + esc(ago(v)) + "</span>";
   if (Array.isArray(v)) return esc(v.join(", "));
@@ -434,14 +739,139 @@ views.reviews = function(){
 
 views.decisions = function(){
   var items = recs("decisions").sort(byCreated).reverse();
-  if (!items.length) return empty("No architecture decisions recorded yet. Use the repostate-architecture skill to record one.");
-  return '<div class="grid" style="--min:340px">' + items.map(function(d){
-    return '<button class="card" data-open="' + esc(d.id) + '" style="padding:16px;gap:8px"><span class="row between"><span class="mono muted">' + esc(d.id) + '</span><span class="row">' + privatePill(d) + statusPill(d) + "</span></span>" +
-      '<span class="title" style="font-size:15px">' + esc(d.title) + "</span>" +
-      (d.decision || d.body ? '<span class="prose small">' + md(String(d.decision || d.body).split(/\n\n/)[0]) + "</span>" : "") +
-      (d.before || d.after ? '<span class="small muted"><strong>Before:</strong> ' + esc(d.before || "—") + " &nbsp;→&nbsp; <strong>After:</strong> " + esc(d.after || "—") + "</span>" : "") +
-      ((d.components || []).length ? '<span class="row">' + d.components.map(function(c){ return '<span class="pill mono">' + esc(c) + "</span>"; }).join("") + "</span>" : "") + "</button>";
-  }).join("") + "</div>";
+  var qs = recs("questions").sort(function(a, b){ return (isDone(a) - isDone(b)) || byCreated(a, b); });
+  if (!items.length && !qs.length) return empty("No decisions or open questions recorded yet. Use the repostate-architecture skill, or <code>repostate.py add questions --title …</code>.");
+  var mode = (ui.views || {}).decisions || (items.some(function(d){ return d.owner; }) ? "table" : "cards"), h = "";
+  if (items.length){
+    h += '<div class="row between"><div class="seg" role="group" aria-label="Layout">' + ["cards","table"].map(function(v){ return '<button data-view="decisions:' + v + '" aria-pressed="' + (mode === v) + '">' + titleCase(v) + "</button>"; }).join("") +
+      '</div><span class="small muted">' + items.filter(function(d){ return d.status === "proposed"; }).length + " to decide · " + items.length + " in all</span></div>";
+    if (mode === "table") h += table("decisions", items, [["id","ID"],["title","Decision"],["status","Status"],["owner","Owner"],["updated_at","Updated"]]);
+    else h += '<div class="grid" style="--min:340px">' + items.map(function(d){
+      return '<button class="card" data-open="' + esc(d.id) + '" style="padding:16px;gap:8px"><span class="row between"><span class="mono muted">' + esc(d.id) + '</span><span class="row">' + privatePill(d) + statusPill(d) + "</span></span>" +
+        '<span class="title" style="font-size:15px">' + esc(d.title) + "</span>" +
+        (d.decision || d.body ? '<span class="prose small">' + md(String(d.decision || d.body).split(/\n\n/)[0]) + "</span>" : "") +
+        (d.before || d.after ? '<span class="small muted"><strong>Before:</strong> ' + esc(d.before || "—") + " &nbsp;→&nbsp; <strong>After:</strong> " + esc(d.after || "—") + "</span>" : "") +
+        (d.owner ? '<span class="small muted">Owner: ' + esc(d.owner) + "</span>" : "") +
+        ((d.components || []).length ? '<span class="row">' + d.components.map(function(c){ return '<span class="pill mono">' + esc(c) + "</span>"; }).join("") + "</span>" : "") + "</button>";
+    }).join("") + "</div>";
+  }
+  var open = qs.filter(function(q){ return !isDone(q); });
+  h += '<section class="panel"><h3>Open questions <span class="small muted" style="font-weight:400">' + open.length + " open" + (qs.length - open.length ? " · " + (qs.length - open.length) + " answered" : "") + "</span></h3>" +
+    (qs.length ? '<div class="table-wrap" style="border:0"><table><thead><tr><th>ID</th><th>Question</th><th>Owner</th><th>Waiting on</th><th>Status</th><th>Asked</th></tr></thead><tbody>' + qs.map(function(q){
+      return '<tr data-open="' + esc(q.id) + '" tabindex="0"' + (isDone(q) ? ' style="opacity:.6"' : "") + '><td class="mono">' + esc(q.id) + "</td><td>" + esc(q.title) + (q.answer ? '<div class="small muted">' + esc(q.answer) + "</div>" : "") + "</td><td>" + esc(q.owner || "") + "</td><td>" + esc(q.waiting_on || "") +
+        "</td><td>" + statusPill(q) + '</td><td class="small muted">' + esc(ago(q.created_at)) + "</td></tr>";
+    }).join("") + "</tbody></table></div>" : '<p class="muted small">None. Add one with <code>repostate.py add questions --title "…" --waiting-on "Client"</code>.</p>') + "</section>";
+  var waiting = {};
+  D.records.forEach(function(r){ if (r.waiting_on && !r._archived && !isDone(r) && matches(r)) push(waiting, r.waiting_on, r); });
+  var who = Object.keys(waiting).sort(natural);
+  h += '<section class="panel"><h3>Waiting on others <span class="small muted" style="font-weight:400">' + who.reduce(function(n, k){ return n + waiting[k].length; }, 0) + " item(s)</span></h3>" +
+    (who.length ? who.map(function(k){
+      return '<div class="entry"><span style="flex:0 0 150px;font-weight:550">' + esc(k) + '</span><div style="flex:1;min-width:0">' + waiting[k].map(function(r){ return "<div>" + idLink(r.id) + ' <span class="small muted">' + esc(ago(r.created_at)) + "</span></div>"; }).join("") + "</div></div>";
+    }).join("") : '<p class="muted small">Nothing is waiting on anyone. Mark an item with <code>--waiting-on "Name"</code>.</p>') + "</section>";
+  return h;
+};
+
+views.testcases = function(){
+  var all = recs("testcases").sort(byId);
+  if (!all.length) return empty("No test cases yet. Add one with <code>repostate.py add testcases --title … --task T001 --kind ui</code>, or import a table.");
+  var statuses = (M.types.testcases || {}).statuses || RES, c = testCounts(all), passed = all.filter(isDone).length, f = (ui.filters || {}).testcases || {}, kinds = {}, groups = {};
+  all.forEach(function(t){ if (t.kind) kinds[t.kind] = 1; push(groups, low(t.task || ""), t); });
+  var h = '<section class="panel"><h3>' + passed + " of " + all.length + " passing (" + Math.round(100 * passed / all.length) + "%)</h3>" + testBar(all) +
+    '<div class="row" style="margin-top:10px;gap:14px">' + statuses.filter(function(k){ return c[k]; }).map(function(k){ return '<span class="row small" style="gap:5px"><span class="sq r-' + esc(k) + '"></span>' + c[k] + " " + esc(resLabel(k)) + "</span>"; }).join("") + "</div></section>";
+  h += '<section class="panel"><h3>Test matrix by task</h3><div class="table-wrap" style="border:0"><table><thead><tr><th>Task</th><th>Test cases</th><th>Passing</th><th>Bugs</th></tr></thead><tbody>' +
+    Object.keys(groups).sort(function(a, b){ return (!a - !b) || natural(a, b); }).map(function(k){
+      var task = get(k), ts = groups[k], bugs = M.bugsByTask[k] || [], ob = bugs.filter(function(b){ return !isDone(b); }).length;
+      return "<tr" + (task ? ' data-open="' + esc(task.id) + '" tabindex="0"' : ' style="cursor:default"') + "><td>" + (task ? '<span class="mono">' + esc(task.id) + "</span> " + esc(task.title) : k ? '<span class="mono">' + esc(ts[0].task) + '</span> <span class="muted">(no such task)</span>' : '<span class="muted">Not linked to a task</span>') +
+        "</td><td>" + testSquares(ts) + '</td><td style="white-space:nowrap">' + ts.filter(isDone).length + " / " + ts.length + "</td><td>" + (ob ? '<span class="pill bad">' + ob + " open</span> " : "") + (bugs.length - ob ? '<span class="pill">' + (bugs.length - ob) + " fixed</span>" : "") + "</td></tr>";
+    }).join("") + "</tbody></table></div></section>";
+  var items = all.filter(function(t){ return (!f.status || t.status === f.status) && (!f.kind || t.kind === f.kind); });
+  h += '<div class="row between"><div class="row">' + filterSelect("testcases", "status", "Any result", statuses.map(function(x){ return [x, resLabel(x)]; })) +
+    (Object.keys(kinds).length ? filterSelect("testcases", "kind", "Any kind", Object.keys(kinds).sort().map(function(x){ return [x, x.toUpperCase()]; })) : "") + '</div><span class="small muted">' + items.length + " shown</span></div>";
+  var cols = [["id","ID"],["title","Scenario"],["kind","Kind"],["task","Task"],["status","Result"],["bug","Bug"]];
+  if (all.some(function(t){ return (t.requirements || []).length; })) cols.push(["requirements","Requirements"]);
+  return h + (items.length ? table("testcases", items, cols) : empty("No test case matches these filters."));
+};
+
+views.bugs = function(){
+  var all = recs("bugs");
+  if (!all.length) return empty("No bugs recorded. Add one with <code>repostate.py add bugs --title … --task T001 --severity high</code>, or import a table.");
+  var sevOrder = ["critical","high","medium","low"], open = all.filter(function(b){ return !isDone(b); }), groups = {};
+  all.sort(function(a, b){ return (isDone(a) - isDone(b)) || (sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity)) || byId(a, b); });
+  all.forEach(function(b){ push(groups, low(b.task || ""), b); });
+  var severe = open.filter(function(b){ return b.severity === "critical" || b.severity === "high"; }).length;
+  var h = '<div class="grid fit" style="--min:180px">' + tile("Open", open.length + (severe ? ' <small style="color:var(--bad)">' + severe + " high or critical</small>" : "")) + tile("Fixed or closed", all.length - open.length) +
+    tile("Tasks with open bugs", Object.keys(groups).filter(function(k){ return k && groups[k].some(function(b){ return !isDone(b); }); }).length) + "</div>";
+  h += '<section class="panel"><h3>By task</h3><div class="table-wrap" style="border:0"><table><thead><tr><th>Task</th><th>Open</th><th>Fixed</th><th>Bugs</th></tr></thead><tbody>' +
+    Object.keys(groups).sort(function(a, b){ return (!a - !b) || natural(a, b); }).map(function(k){
+      var task = get(k), bs = groups[k], ob = bs.filter(function(b){ return !isDone(b); }).length;
+      return "<tr" + (task ? ' data-open="' + esc(task.id) + '" tabindex="0"' : ' style="cursor:default"') + "><td>" + (task ? '<span class="mono">' + esc(task.id) + "</span> " + esc(task.title) : '<span class="muted">' + (k ? esc(bs[0].task) + " (no such task)" : "Not linked to a task") + "</span>") +
+        "</td><td>" + (ob || "") + "</td><td>" + (bs.length - ob || "") + "</td><td>" + bs.map(function(b){ return '<button class="linkish mono" data-open="' + esc(b.id) + '">' + esc(b.id) + "</button>"; }).join(" ") + "</td></tr>";
+    }).join("") + "</tbody></table></div></section>";
+  var cols = [["id","ID"],["title","Bug"],["severity","Severity"],["status","Status"],["task","Task"],["testcase","Test case"],["fix_commit","Fix commit"]].filter(function(c){
+    return c[0] === "id" || c[0] === "title" || all.some(function(b){ return b[c[0]]; });
+  });
+  return h + table("bugs", all, cols);
+};
+
+function reqIndex(){
+  var reqs = {}, known = false;
+  function ent(id){ var k = low(id); return reqs[k] || (reqs[k] = {id:String(id), rec:null, tasks:[], tests:[], via:[]}); }
+  D.records.forEach(function(r){
+    if (r._archived) return;
+    if (r._type === "requirements"){ ent(r.id).rec = r; ent(r.id).id = r.id; known = true; }
+    if (r._type === "tasks") (r.requirements || []).forEach(function(q){ ent(q).tasks.push(r); });
+  });
+  var loose = [];
+  D.records.forEach(function(r){
+    if (r._archived || r._type !== "testcases") return;
+    var own = r.requirements || [], task = get(r.task), inherited = task ? task.requirements || [] : [];
+    if (own.length) own.forEach(function(q){ ent(q).tests.push(r); });
+    else if (inherited.length) inherited.forEach(function(q){ ent(q).via.push(r); });
+    else loose.push(r);
+  });
+  var rows = Object.keys(reqs).sort(natural).map(function(k){
+    var e = reqs[k], tests = e.tests.concat(e.via);
+    e.all = tests;
+    e.state = !e.tasks.length && !tests.length ? "no task" : !tests.length ? "no test" : tests.some(function(t){ return /fail/.test(t.status); }) ? "failing" : tests.every(isDone) ? "verified" : "in progress";
+    e.unknown = known && !e.rec;
+    return e;
+  });
+  return {rows: rows, loose: loose, known: known};
+}
+views.trace = function(){
+  var ix = reqIndex(), rows = ix.rows, mode = (ui.views || {}).trace || "all";
+  if (!rows.length) return empty("No requirements are linked yet. Link them with <code>repostate.py update T001 --add requirements=MSG-01</code>.");
+  function n(state){ return rows.filter(function(e){ return e.state === state; }).length; }
+  var gaps = rows.filter(function(e){ return e.state === "no task" || e.state === "no test" || e.unknown; });
+  var h = '<div class="grid fit" style="--min:170px">' + tile("Requirements", rows.length) + tile("Verified by tests", n("verified")) + tile("Failing", n("failing")) + tile("No test", n("no test")) + tile("No task", n("no task")) + "</div>";
+  h += '<div class="row between"><div class="seg" role="group" aria-label="Rows">' + [["all","All"],["gaps","Gaps only"]].map(function(v){ return '<button data-view="trace:' + v[0] + '" aria-pressed="' + (mode === v[0]) + '">' + v[1] + "</button>"; }).join("") +
+    '</div><span class="small muted">' + gaps.length + " requirement(s) with a gap · " + ix.loose.length + " test(s) with no requirement</span></div>";
+  var cls = {"verified":"ok", "failing":"bad", "no test":"warn", "no task":"warn", "in progress":"accent"};
+  var show = (mode === "gaps" ? gaps : rows).filter(function(e){ return !ui.q || (e.id + " " + ((e.rec || {}).title || "")).toLowerCase().indexOf(ui.q.toLowerCase()) >= 0; });
+  h += show.length ? '<div class="table-wrap"><table><thead><tr><th>Requirement</th><th>Tasks</th><th>Test cases</th><th>State</th></tr></thead><tbody>' + show.map(function(e){
+    return "<tr" + (e.rec ? ' data-open="' + esc(e.rec.id) + '" tabindex="0"' : ' style="cursor:default"') + '><td><span class="mono">' + esc(e.id) + "</span> " + esc((e.rec || {}).title || "") + (e.unknown ? ' <span class="pill warn">not in the requirements list</span>' : "") + "</td><td>" +
+      (e.tasks.length ? e.tasks.sort(byId).map(function(t){ return '<span style="white-space:nowrap"><span class="dot s-' + taskState(t) + '" style="display:inline-block"></span> <button class="linkish mono" data-open="' + esc(t.id) + '">' + esc(t.id) + "</button></span>"; }).join(" &nbsp;") : '<span class="muted">none</span>') +
+      "</td><td>" + (e.all.length ? testSquares(e.tests) + (e.via.length ? (e.tests.length ? " " : "") + '<span title="Linked through the task, not directly" style="opacity:.75">' + testSquares(e.via) + '</span> <span class="small muted">via task</span>' : "") : '<span class="muted">none</span>') +
+      '</td><td><span class="pill ' + cls[e.state] + '">' + e.state + "</span></td></tr>";
+  }).join("") + "</tbody></table></div>" : empty("No requirement matches.");
+  if (ix.loose.length) h += '<section class="panel"><h3>Tests with no requirement <span class="small muted" style="font-weight:400">' + ix.loose.length + "</span></h3>" + ix.loose.sort(byId).map(function(t){ return "<div>" + idLink(t.id) + " " + statusPill(t) + "</div>"; }).join("") + "</section>";
+  var bare = D.records.filter(function(t){ return t._type === "tasks" && !t._archived && !(t.requirements || []).length; });
+  if (bare.length) h += '<section class="panel"><h3>Tasks with no requirement <span class="small muted" style="font-weight:400">' + bare.length + "</span></h3>" + bare.sort(byId).map(taskRow).join("") + "</section>";
+  return h;
+};
+
+views.evidence = function(){
+  var files = D.evidence || [], groups = {}, loose = [];
+  files.forEach(function(e){ var hit = false; (e.ids || []).forEach(function(id){ if (get(id)){ push(groups, low(id), e); hit = true; } }); if (!hit) loose.push(e); });
+  D.records.forEach(function(r){ if (!r._archived && (r.evidence || []).some(isImg) && !groups[low(r.id)]) groups[low(r.id)] = []; });
+  var keys = Object.keys(groups).filter(function(k){ return matches(get(k)); }).sort(natural);
+  if (!keys.length && !loose.length) return empty("No screenshots found. Put images in <code>screenshots/</code> or <code>ui-review/</code> with the task id in the file or folder name, for example <code>screenshots/T002-before.png</code>.");
+  var rank = {before:0, after:1, "":2};
+  return keys.map(function(k){
+    var r = get(k), list = evidenceFor(r).filter(function(e){ return isImg(e.path); });
+    return '<section class="panel"><h3><span>' + idLink(r.id) + '</span><span class="small muted" style="font-weight:400">' + list.length + " image(s)</span></h3>" + thumbs(list) + "</section>";
+  }).join("") + (loose.length ? '<section class="panel"><h3>Not linked to a record <span class="small muted" style="font-weight:400">' + loose.length + " image(s): add a record id to the file or folder name</span></h3>" +
+    thumbs(loose.slice(0, 40).sort(function(a, b){ return rank[a.label] - rank[b.label] || natural(a.path, b.path); })) + "</section>" : "");
 };
 
 views.notes = function(){ return generic("notes"); };
@@ -465,37 +895,91 @@ function generic(type){
 }
 
 /* ---------- detail dialog ---------- */
-var SKIP = {id:1,title:1,status:1,priority:1,body:1,summary:1,details:1,tags:1,findings:1,scope:1,context:1,decision:1,consequences:1,alternatives:1};
+var SKIP = {id:1,title:1,status:1,priority:1,body:1,summary:1,details:1,tags:1,findings:1,scope:1,context:1,decision:1,consequences:1,alternatives:1,
+  requirements:1,repos:1,prs:1,figma:1,evidence:1,estimate_hours:1,actual_hours:1,history:1,steps:1,expected:1,answer:1};
+function timeline(r){
+  var ev = [], me = low(r.id);
+  if (r.created_at) ev.push({at:r.created_at, html:"Created" + (r.author ? " by " + esc(r.author) : "") + (r.source ? ' <span class="muted">(imported from ' + esc(r.source.file) + ")</span>" : "")});
+  var logged = {};
+  D.records.forEach(function(x){
+    if (x._type === "progress" && (x.tasks || []).some(function(d){ return low(d) === me; })){
+      logged[x.summary] = 1;
+      ev.push({at:x.created_at, html:'<button class="linkish" data-open="' + esc(x.id) + '">' + esc(x.summary) + "</button>" + (x.hours ? ' <span class="muted">(' + hrs(x.hours) + ")</span>" : "")});
+    }
+    if (x._type === "bugs" && low(x.task) === me) ev.push({at:x.created_at, html:"Bug reported: " + idLink(x.id)});
+  });
+  (r.history || []).forEach(function(h){
+    var by = h.by ? ' <span class="muted">by ' + esc(h.by) + "</span>" : "";
+    if (h.field === "hours"){ if (!logged[h.note]) ev.push({at:h.at, html:"Logged " + hrs(h.add) + (h.note ? ": " + esc(h.note) : "") + by}); }
+    else ev.push({at:h.at, html:"Status " + esc(resLabel(h.from || "none")) + " → <strong>" + esc(resLabel(h.to)) + "</strong>" + by});
+  });
+  ev.sort(function(a, b){ return String(a.at || "").localeCompare(String(b.at || "")); });
+  return ev.map(function(e){
+    return '<div class="entry" style="padding:7px 0"><span class="when small" style="flex:0 0 96px" title="' + esc(e.at) + '">' + niceDate(e.at) + " " + esc(time(e.at)) + '</span><div style="min-width:0">' + e.html + "</div></div>";
+  }).join("");
+}
+function extraSections(r){
+  var h = "", me = low(r.id);
+  if ((r.requirements || []).length) h += sec("Requirements", '<div class="row">' + r.requirements.map(reqChip).join("") + "</div>");
+  if (r.estimate_hours != null || r.actual_hours != null) h += sec("Hours", '<div class="row" style="gap:14px"><span>' + hrs(r.actual_hours || 0) + " actual of " + hrs(r.estimate_hours) +
+    ' estimated</span><span style="flex:1;max-width:240px">' + hourBar(r.estimate_hours, r.actual_hours) + "</span>" + (isDone(r) ? diffCell(r.estimate_hours, r.actual_hours) : "") + "</div>");
+  var ev = evidenceFor(r), imgs = ev.filter(function(e){ return isImg(e.path); }), docs = ev.filter(function(e){ return !isImg(e.path); }), links = [];
+  if ((r.repos || []).length) links.push(["Repos", r.repos.map(repoLink).join(", ")]);
+  if ((r.prs || []).length) links.push(["Pull requests", r.prs.map(prLink).join(", ")]);
+  if ((r.figma || []).length) links.push(["Figma", r.figma.map(function(u){ return linkOut(u); }).join("<br>")]);
+  if (docs.length) links.push(["Evidence links", docs.map(function(e){ return linkOut(e.path); }).join("<br>")]);
+  if (links.length) h += sec("Links", '<dl class="kv">' + links.map(function(l){ return "<dt>" + l[0] + "</dt><dd>" + l[1] + "</dd>"; }).join("") + "</dl>");
+  if (imgs.length) h += sec("Evidence (" + imgs.length + ")", thumbs(imgs));
+  var tests = r._type === "requirements" ? [] : (M.testsByTask[me] || []), bugs = M.bugsByTask[me] || [];
+  if (r._type === "requirements"){
+    var e = reqIndex().rows.filter(function(x){ return low(x.id) === me; })[0];
+    if (e){
+      h += sec("Tasks (" + e.tasks.length + ")", e.tasks.length ? e.tasks.sort(byId).map(taskRow).join("") : '<p class="muted small">No task covers this requirement.</p>');
+      tests = e.all;
+    }
+  }
+  if (tests.length || r._type === "requirements") h += sec("Test cases (" + tests.filter(isDone).length + " of " + tests.length + " passing)", tests.length ? testBar(tests) + '<div style="margin-top:8px">' + tests.slice().sort(byId).map(function(t){
+    return '<button class="trow" data-open="' + esc(t.id) + '"><span class="sq r-' + esc(t.status) + '"></span><span class="mono muted">' + esc(t.id) + '</span><span style="flex:1;min-width:0">' + esc(t.title) + (t.status_note ? '<span class="small muted"> · ' + esc(t.status_note) + "</span>" : "") + "</span>" +
+      (t.kind ? '<span class="pill">' + esc(String(t.kind).toUpperCase()) + "</span>" : "") + statusPill(t) + (t.bug ? '<span class="mono small">' + esc(t.bug) + "</span>" : "") + "</button>";
+  }).join("") + "</div>" : '<p class="muted small">No test covers this requirement.</p>');
+  if (bugs.length) h += sec("Bugs (" + bugs.filter(function(b){ return !isDone(b); }).length + " open, " + bugs.filter(isDone).length + " fixed)", bugs.slice().sort(byId).map(function(b){
+    return '<button class="trow" data-open="' + esc(b.id) + '">' + sevPill(b.severity) + '<span class="mono muted">' + esc(b.id) + '</span><span style="flex:1;min-width:0">' + esc(b.title) + "</span>" + statusPill(b) + (b.fix_commit ? '<span class="mono small">' + esc(String(b.fix_commit).slice(0, 7)) + "</span>" : "") + "</button>";
+  }).join(""));
+  if (r._type === "tasks" || (r.history || []).length) h += sec("Timeline", timeline(r));
+  return h;
+}
 function openItem(id){
   var r = get(id); if (!r) return;
   var t = M.types[r._type] || {};
-  var h = '<div class="dlg-head"><div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="row"><span class="mono muted">' + esc(r.id) + '</span><span class="pill">' + esc(t.label || r._type) + "</span>" + statusPill(r) + prioPill(r) + privatePill(r) + tagPills(r) + "</span>" +
+  var h = '<div class="dlg-head"><div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="row"><span class="mono muted">' + esc(r.id) + '</span><span class="pill">' + esc(t.label || r._type) + "</span>" + statusPill(r) + prioPill(r) + sevPill(r._type === "bugs" ? r.severity : "") + (r.slice ? '<span class="pill">Slice ' + esc(r.slice) + "</span>" : "") + privatePill(r) + tagPills(r) + "</span>" +
     '<h2 id="dlg-title" style="font-size:19px;line-height:1.3">' + esc(label(r)) + '</h2></div><button class="btn" data-close aria-label="Close">Close</button></div><div class="dlg-body">';
   if (r.summary && r.title) h += '<p class="prose">' + md(r.summary) + "</p>";
-  ["body","details","context","decision","consequences","alternatives"].forEach(function(k){
-    if (r[k]) h += '<section><div class="section-title">' + esc(titleCase(k)) + '</div><div class="prose" style="margin-top:6px">' + (Array.isArray(r[k]) ? md("- " + r[k].join("\n- ")) : md(r[k])) + "</div></section>";
+  ["body","details","steps","expected","answer","context","decision","consequences","alternatives"].forEach(function(k){
+    if (r[k]) h += '<section><div class="section-title">' + esc(titleCase(k === "body" && r._type === "tasks" ? "description" : k)) + '</div><div class="prose" style="margin-top:6px">' + (Array.isArray(r[k]) ? md("- " + r[k].join("\n- ")) : md(r[k])) + "</div></section>";
   });
   if (r._type === "reviews") h += reviewDetail(r);
   if (r._type === "goals"){
     var s = goalStats(r);
     h += '<section><div class="section-title">Linked tasks (' + s.done + " of " + s.linked.length + ' done)</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">' + (s.linked.length ? s.linked.sort(byCreated).map(taskCard).join("") : '<p class="muted small">No tasks link to this goal. Link one with <code>--goal ' + esc(r.id) + "</code>.</p>") + "</div></section>";
   }
-  var children = D.records.filter(function(x){ return x.parent && String(x.parent).toLowerCase() === String(r.id).toLowerCase(); });
+  h += extraSections(r);
+  var children = D.records.filter(function(x){ return x.parent && low(x.parent) === low(r.id); });
   if (children.length) h += '<section><div class="section-title">Subtasks</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">' + children.sort(byCreated).map(taskCard).join("") + "</div></section>";
-  var blocks = D.records.filter(function(x){ return (x.depends_on || []).some(function(d){ return String(d).toLowerCase() === String(r.id).toLowerCase(); }); });
-  var mentions = D.records.filter(function(x){ return x !== r && ((x.tasks || []).concat(x.related || [])).some(function(d){ return String(d).toLowerCase() === String(r.id).toLowerCase(); }); });
+  var blocks = D.records.filter(function(x){ return (x.depends_on || []).some(function(d){ return low(d) === low(r.id); }); });
+  var mentions = D.records.filter(function(x){ return x !== r && x._type !== "progress" && ((x.tasks || []).concat(x.related || [], x.bug ? [x.bug] : [], x.testcase ? [x.testcase] : [])).some(function(d){ return low(d) === low(r.id); }); });
   var kv = [];
   Object.keys(r).forEach(function(k){
     if (SKIP[k] || k.charAt(0) === "_" || r[k] == null || r[k] === "") return;
     var v = r[k];
-    if (k === "goal" || k === "parent") v = idLink(v);
+    if (k === "goal" || k === "parent" || k === "task" || k === "testcase" || k === "bug") v = idLink(v);
     else if (k === "depends_on" || k === "tasks" || k === "related") v = v.map(idLink).join("<br>");
+    else if (k === "fix_commit") v = commitLink(v);
     else if (/_at$/.test(k)) v = esc(new Date(v).toLocaleString()) + ' <span class="muted">(' + esc(ago(r[k])) + ")</span>";
     else if (k === "source") v = '<span class="mono">' + esc(v.file) + (v.line ? ":" + esc(v.line) : "") + "</span>";
     else if (Array.isArray(v)) v = esc(v.join(", "));
     else if (typeof v === "object") v = '<span class="mono small">' + esc(JSON.stringify(v)) + "</span>";
     else v = esc(v);
-    kv.push("<dt>" + esc(titleCase(k)) + "</dt><dd>" + v + "</dd>");
+    kv.push("<dt>" + esc(titleCase(k === "depends_on" ? "waits on" : k)) + "</dt><dd>" + v + "</dd>");
   });
   if (blocks.length) kv.push("<dt>Blocks</dt><dd>" + blocks.map(function(x){ return idLink(x.id); }).join("<br>") + "</dd>");
   if (mentions.length) kv.push("<dt>Mentioned in</dt><dd>" + mentions.map(function(x){ return idLink(x.id); }).join("<br>") + "</dd>");
@@ -533,9 +1017,16 @@ function reviewDetail(r){
 /* ---------- shell ---------- */
 function route(){ var m = location.hash.match(/^#\/([\w-]+)(?:\/(.+))?/); return m ? {page:m[1], arg:m[2] && decodeURIComponent(m[2])} : {page:"overview"}; }
 function pages(){
-  var list = ORDER.filter(function(p){ return p === "overview" || (M.types[p] && M.hidden.indexOf(p) < 0); });
-  Object.keys(M.types).forEach(function(k){ if (list.indexOf(k) < 0 && M.hidden.indexOf(k) < 0) list.push(k); });
-  return list.filter(function(p){ return p === "overview" || p === "tasks" || p === "progress" || D.records.some(function(r){ return r._type === p; }) || (D.config.types || {})[p]; });
+  function has(type){ return D.records.some(function(r){ return r._type === type && !r._archived; }); }
+  var custom = Object.keys(M.types).filter(function(k){ return ORDER.indexOf(k) < 0 && !EMBEDDED[k]; });
+  return ORDER.concat(custom).filter(function(p){
+    if (M.hidden.indexOf(p) >= 0) return false;
+    if (p === "overview" || p === "tasks" || p === "progress") return true;
+    if (p === "trace") return has("requirements") || D.records.some(function(r){ return (r.requirements || []).length; });
+    if (p === "evidence") return (D.evidence || []).length > 0 || D.records.some(function(r){ return (r.evidence || []).some(isImg); });
+    if (p === "decisions") return has("decisions") || has("questions");
+    return has(p) || ((D.config.types || {})[p] && ORDER.indexOf(p) < 0);
+  });
 }
 function render(){
   if (!D){ app.innerHTML = welcome(); return; }
@@ -545,12 +1036,14 @@ function render(){
   var name = (cfg.project || {}).name || g.repo || "Project";
   var counts = {};
   D.records.forEach(function(x){ if (!x._archived && matches(x) && !(isDone(x) && x._type !== "progress" && x._type !== "goals" && x._type !== "decisions")) counts[x._type] = (counts[x._type] || 0) + 1; });
+  counts.decisions = D.records.filter(function(x){ return !x._archived && matches(x) && ((x._type === "decisions" && x.status === "proposed") || (x._type === "questions" && !isDone(x))); }).length;
+  if (list.indexOf("trace") >= 0) counts.trace = reqIndex().rows.filter(function(e){ return e.state === "no task" || e.state === "no test" || e.unknown; }).length;
   var page = r.page === "item" ? "overview" : r.page;
   var nav = list.map(function(p){
-    var lbl = p === "overview" ? "Overview" : (M.types[p] || {}).label || titleCase(p);
+    var lbl = pageLabel(p);
     return '<a class="nav" href="#/' + p + '"' + (p === page ? ' aria-current="page"' : "") + "><span>" + esc(lbl) + "</span>" + (p !== "overview" && counts[p] ? '<span class="count">' + counts[p] + "</span>" : "") + "</a>";
   }).join("");
-  var title = page === "overview" ? name : (M.types[page] || {}).label || titleCase(page);
+  var title = page === "overview" ? name : pageLabel(page);
   var body = (views[page] || function(){ return generic(page); })();
   app.innerHTML = '<div class="app"><nav class="side" aria-label="Sections"><div class="brand"><h1>' + esc(name) + '</h1><div class="mono muted" style="margin-top:4px">' + esc(g.branch ? "⎇ " + g.branch : "") + "</div></div>" + nav +
     '<div class="side-foot small muted"><span>' + D.records.length + " records · built " + esc(ago(D.generated_at)) + "</span>" +
@@ -591,6 +1084,7 @@ function loadFolder(files){
 
 /* ---------- events ---------- */
 document.addEventListener("click", function(e){
+  if (e.target.closest("a[href]") && !e.target.closest("a[data-open]")) return;
   var el = e.target.closest("[data-open],[data-close],[data-scope],[data-view],[data-sort],[data-theme-toggle],[data-pick]");
   if (!el) return;
   if (el.hasAttribute("data-open")){ e.preventDefault(); openItem(el.getAttribute("data-open")); return; }
@@ -611,7 +1105,7 @@ document.addEventListener("click", function(e){
   save(); render();
 });
 document.addEventListener("keydown", function(e){
-  if (e.key === "Enter" && e.target.matches && e.target.matches("tr[data-open]")) openItem(e.target.getAttribute("data-open"));
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("tr[data-open],g[data-open]")){ e.preventDefault(); openItem(e.target.getAttribute("data-open")); }
 });
 document.addEventListener("change", function(e){
   var t = e.target;

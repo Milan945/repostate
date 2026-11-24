@@ -1,0 +1,19 @@
+{
+  "id": "T-keum",
+  "status": "done",
+  "title": "Import markdown tables, keep ids, refresh with --update",
+  "goal": "G-drx3",
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T06:43:07Z",
+  "updated_at": "2026-11-24T06:43:07Z",
+  "done_at": "2026-11-24T06:43:07Z",
+  "history": [
+    {
+      "at": "2026-11-24T06:43:07Z",
+      "by": "noreply@anthropic.com",
+      "field": "status",
+      "from": "todo",
+      "to": "done"
+    }
+  ]
+}

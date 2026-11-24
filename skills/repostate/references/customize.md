@@ -52,6 +52,22 @@
 | `types.<name>.label` | Name in the dashboard. |
 | `types.<name>.prefix` | Id prefix for a new type (one or two capital letters). Do not change it for a type that already has records. |
 | `types.<name>.view` | Dashboard layout for a new type: `board` (columns by status), `table`, `timeline` or `cards`. |
+| `types.<name>.ids` | `"sequential"` makes the CLI generate `T001`, `T002`, … (prefix plus a zero-padded number, width from `id_width`, default 3) instead of random ids. Two branches can then create the same id, so use it for solo work. Any record can also be given an id directly with `add … --id`. |
+| `slices` | Names for slices, shown beside the slice letter: `{"A": "Conversation list", "D1": "Profile"}`. |
+| `evidence.dirs` | Folders scanned for screenshots, default `["screenshots", "ui-review"]`. An image is attached to a record when the record's id is in its file or folder name. |
+
+## Built-in types you can reshape
+
+`tasks`, `goals`, `progress`, `decisions`, `questions`, `testcases`, `bugs`, `requirements`, `reviews` and `notes` are built in; a page appears in the dashboard once a type has records. Any of them can be changed under `types`. For example, different test results or bug stages:
+
+```json
+{ "types": {
+    "testcases": { "statuses": ["not_run", "pass", "pass_with_question", "fail", "blocked", "skipped"],
+                   "done": ["pass", "pass_with_question"] },
+    "bugs": { "statuses": ["open", "fixing", "in_review", "fixed", "wontfix"], "done": ["fixed", "wontfix"] },
+    "tasks": { "ids": "sequential", "fields": { "client": { "type": "string" } } }
+} }
+```
 
 ## Adding a type
 

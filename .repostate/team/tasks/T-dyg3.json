@@ -1,0 +1,19 @@
+{
+  "id": "T-dyg3",
+  "status": "done",
+  "title": "Evidence gallery from screenshots/ and ui-review/",
+  "goal": "G-drx3",
+  "author": "noreply@anthropic.com",
+  "created_at": "2026-11-24T06:43:06Z",
+  "updated_at": "2026-11-24T06:43:06Z",
+  "done_at": "2026-11-24T06:43:06Z",
+  "history": [
+    {
+      "at": "2026-11-24T06:43:06Z",
+      "by": "noreply@anthropic.com",
+      "field": "status",
+      "from": "todo",
+      "to": "done"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ else
 fi
 
 mkdir -p "$TARGET"
-for skill in repostate repostate-review repostate-architecture; do
+for skill in repostate repostate-review repostate-architecture repostate-qa; do
   rm -rf "${TARGET:?}/$skill"
   cp -R "$SRC/$skill" "$TARGET/$skill"
   echo "installed $skill -> $TARGET/$skill"

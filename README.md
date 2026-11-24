@@ -1,6 +1,6 @@
 # repostate
 
-**Your project's tasks, goals, progress, code reviews and architecture decisions, kept as JSON inside the repo, with a dashboard that opens from disk.**
+**Your project's tasks, goals, progress, test cases, bugs, code reviews and decisions, kept as JSON inside the repo, with a dashboard that opens from disk.**
 
 repostate is an [Agent Skill](https://agentskills.io) for coding agents (Claude Code, Cursor, Codex and others). Instead of the agent rewriting `tasks.md` and `progress.md` by hand, it runs a small CLI that saves each item as a JSON file. A static HTML page shows everything. Team items are committed and shared through git. Personal items stay on your machine.
 
@@ -11,7 +11,7 @@ repostate is an [Agent Skill](https://agentskills.io) for coding agents (Claude 
 ## Why
 
 - **Markdown plans drift.** Agents rewrite whole files, lose items, and break formatting. Here every change is one small, validated write.
-- **You can see the state at a glance.** Board, goal progress, a progress timeline, review findings and architecture decisions on one page.
+- **You can see the state at a glance.** Board, slices, dependency graph, estimate against actual hours, test matrix, bugs, requirement traceability, screenshots, review findings and decisions.
 - **It works for a team.** One file per record and random ids mean two people on two branches don't get merge conflicts.
 - **Nothing to host.** No server, no database, no account. Python 3.8+ and a browser.
 - **No lock-in.** It's plain JSON in your repo, and `export` writes it back out as markdown.
@@ -53,6 +53,11 @@ Things you can ask for:
 | "What's left on this project?" | Lists open tasks |
 | "Add a task to cache tax lookups, high priority" | Creates a task |
 | "Log what we did today" | Adds a progress entry and closes finished tasks |
+| "Estimate T005 at 10 hours and put it in slice B" | Sets the estimate and slice |
+| "What can I start now?" | Lists tasks whose dependencies are all done |
+| "Record the test results for the list screen" | Saves test cases with pass, fail, blocked or not run |
+| "TC-005 failed, log a bug" | Creates a bug linked to the task and the test case |
+| "Which requirements have no test?" | Reads the traceability gaps |
 | "Review this branch" | Saves a code review with findings, scoped to the branch |
 | "We're moving webhooks to a worker, record that" | Saves an architecture decision with before and after |
 | "Open the dashboard" | Builds and opens `.repostate/index.html` |
@@ -64,6 +69,11 @@ python3 .repostate/repostate.py add tasks --title "Cache tax lookups" --priority
 python3 .repostate/repostate.py list tasks --open
 python3 .repostate/repostate.py done T-q57h
 python3 .repostate/repostate.py log "Cached tax lookups per cart" --details "p95 down 40 ms"
+python3 .repostate/repostate.py add tasks --id T037 --title "Mute a conversation" --slice D3 --estimate 6 --depends T005,T006
+python3 .repostate/repostate.py hours T037 2.5 --note "API wiring"
+python3 .repostate/repostate.py add testcases --id TC-014 --title "Badge caps at 99+" --task T003 --kind ui
+python3 .repostate/repostate.py update TC-014 --result fail
+python3 .repostate/repostate.py add bugs --title "Badge shows 100" --task T003 --severity medium --set testcase=TC-014
 python3 .repostate/repostate.py open
 ```
 
@@ -84,13 +94,46 @@ Run `python3 .repostate/repostate.py --help` for every command.
 
 ![Task board](docs/images/tasks.png)
 
-## The three skills
+## What the dashboard shows
+
+**Task detail.** Click any task to see its description, requirements, repos, pull requests, estimate and actual hours, Figma links, screenshots, test cases, bugs and a timeline of status changes and log entries.
+
+![Task detail panel](docs/images/task-detail.png)
+
+**Slices and "ready to start".** Tasks grouped by slice (A, B, C, D1 …) with a progress bar, hours and test results for each, and a list of tasks that are not started and have every dependency done.
+
+![Slice board](docs/images/slices.png)
+
+**Dependency graph.** Tasks drawn left to right by what they wait on, coloured by status, with the critical path (the longest chain of unfinished work, weighted by estimates) marked.
+
+![Dependency graph](docs/images/graph.png)
+
+**Estimate and actual.** Hours per task and per slice, and how finished work compared with its estimate.
+
+![Hours view](docs/images/hours.png)
+
+**Test matrix and bugs.** Every test case as a coloured square per task, the overall pass rate, and open and fixed bug counts per task. Task cards on the board carry a pass-rate bar and a bug count.
+
+![Test matrix](docs/images/tests.png)
+
+**Requirements traceability.** Requirement → tasks → test cases, with each requirement marked verified, failing, in progress, no test or no task. Tests and tasks with no requirement are listed too.
+
+![Traceability](docs/images/trace.png)
+
+**Evidence.** Images in `screenshots/` and `ui-review/` are attached to the record whose id is in the file or folder name (`screenshots/T002-before.png`), and shown as thumbnails on the task and on an Evidence page.
+
+**Decisions and open questions.** Decisions with owner and status, open questions, and everything that is waiting on someone else, grouped by who.
+
+Pages appear only when there is data for them, so a small repo that only tracks tasks stays simple.
+
+## The four skills
 
 | Skill | Use it for |
 |---|---|
-| `repostate` | Tasks, goals, progress log, notes, importing markdown, the dashboard |
+| `repostate` | Tasks (slices, dependencies, estimates, hours, links), goals, progress log, open questions, notes, importing markdown, the dashboard |
+| `repostate-qa` | Test cases and results, bugs linked to tasks and tests, requirement traceability, screenshot evidence |
 | `repostate-review` | Code reviews scoped to a **branch**, **worktree**, **agent session**, **commit range** or **uncommitted changes**. Each finding has a severity, file and line. The dashboard flags a review as outdated when its branch gets new commits. |
-| `repostate-architecture` | Architecture decision records: context, decision, consequences, alternatives, before and after, affected components and linked tasks |
+| `repostate-architecture` | Decision records: context, decision, consequences, alternatives, before and after, owner, affected components and linked tasks |
 
 ![A code review](docs/images/review.png)
 
@@ -100,7 +143,7 @@ Run `python3 .repostate/repostate.py --help` for every command.
 |---|---|---|
 | Stored in | `.repostate/team/` (committed) | `.repostate/personal/` (gitignored) |
 | Who sees it | Everyone with access to the repo | Only you |
-| Default for | Tasks, goals, progress, decisions | Code reviews, notes |
+| Default for | Tasks, goals, progress, decisions, questions, test cases, bugs, requirements | Code reviews, notes |
 
 - Move items with `promote <id>` (personal → team) and `unshare <id>` (team → personal).
 - The dashboard has an **All / Team / Personal** switch, and personal items carry a "Private" badge.
@@ -116,7 +159,27 @@ Run `python3 .repostate/repostate.py --help` for every command.
 python3 .repostate/repostate.py import tasks.md progress.md goals.md docs/adr/*.md --dry-run
 ```
 
-Understands checkbox lists, status headings ("In progress", "Done", "Blocked"), nested subtasks, `#tags`, `@assignees`, `P0`–`P3` or `!high` priorities, `due: 2026-12-05`, dated progress headings and ADR files. Re-running skips items already imported. Details: [skills/repostate/references/import.md](skills/repostate/references/import.md).
+Understands checkbox lists, status headings ("In progress", "Done", "Blocked"), nested subtasks, `#tags`, `@assignees`, `P0`–`P3` or `!high` priorities, `due: 2026-12-05`, dated progress headings and ADR files. Re-running skips items already imported.
+
+It also reads **markdown tables**, so a hand-kept hub file imports in one go:
+
+```markdown
+## Tasks
+| ID   | Task               | Slice | Status      | Depends on | Est dev h | Actual h | Requirements |
+|------|--------------------|-------|-------------|------------|-----------|----------|--------------|
+| T001 | Conversation list  | A     | ✅ Done     | —          | 6         | 7        | MSG-01       |
+| T004 | Message thread API | B     | In progress | T001       | 8         | 3        | MSG-04       |
+
+## Test cases
+| TC     | Scenario            | Task | Kind | Result | Bug     |
+|--------|---------------------|------|------|--------|---------|
+| TC-005 | Long names truncate | T002 | UI   | Fail   | BUG-001 |
+
+## Defects
+| ID      | Defect              | Severity | Status | Task | Test case | Fix commit |
+```
+
+Tables of tasks, test cases, defects, decisions, open questions and requirements are recognised from their columns or the heading above them. Ids in the table are kept. While the markdown file is still where you edit, `import --update` refreshes the records from changed rows. Details: [skills/repostate/references/import.md](skills/repostate/references/import.md).
 
 ## Customize
 
@@ -130,19 +193,16 @@ Edit `.repostate/config.json`:
       "statuses": ["backlog", "todo", "doing", "review", "done"],
       "fields": { "estimate_hours": { "type": "number" }, "client": { "type": "string" } }
     },
-    "bugs": {
-      "prefix": "B", "label": "Bugs", "view": "board",
-      "statuses": ["new", "fixing", "fixed"],
-      "fields": { "severity": { "type": "enum", "options": ["low", "high"], "required": true } }
-    }
+    "testcases": { "statuses": ["not_run", "pass", "pass_with_question", "fail", "blocked", "skipped"] },
+    "meetings": { "prefix": "M", "label": "Meetings", "view": "timeline", "statuses": [] }
   },
   "hidden": ["notes"]
 }
 ```
 
-New types like `bugs` get their own page in the dashboard. All options: [skills/repostate/references/customize.md](skills/repostate/references/customize.md). Record shapes: [skills/repostate/references/schema.md](skills/repostate/references/schema.md).
+`tasks`, `goals`, `progress`, `decisions`, `questions`, `testcases`, `bugs`, `requirements`, `reviews` and `notes` are built in and can all be reshaped this way. A new type of your own (say `meetings`) gets its own page in the dashboard. You can also name slices (`"slices": {"A": "Conversation list"}`), change the screenshot folders (`"evidence": {"dirs": [...]}`), and switch a type to generated `T001, T002 …` ids (`"ids": "sequential"`). All options: [skills/repostate/references/customize.md](skills/repostate/references/customize.md). Record shapes: [skills/repostate/references/schema.md](skills/repostate/references/schema.md).
 
-![Architecture decisions in dark mode](docs/images/decisions-dark.png)
+![Decisions in dark mode](docs/images/decisions-dark.png)
 
 ## Design choices
 

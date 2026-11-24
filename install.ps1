@@ -17,7 +17,7 @@ if (-not (Test-Path (Join-Path $src "repostate\SKILL.md"))) {
 }
 
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-foreach ($skill in "repostate", "repostate-review", "repostate-architecture") {
+foreach ($skill in "repostate", "repostate-review", "repostate-architecture", "repostate-qa") {
   $dest = Join-Path $target $skill
   if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
   Copy-Item -Recurse (Join-Path $src $skill) $dest

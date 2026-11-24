@@ -424,5 +424,242 @@ class TestBuildAndSummary(RepoCase):
         self.assertTrue(os.path.exists(os.path.join(self.dir, ".github", "workflows", "repostate-pr.yml")))
 
 
+
+class TestIdsAndTaskFields(RepoCase):
+    def test_custom_ids(self):
+        t = self.run_json("add", "tasks", "--id", "T001", "--title", "first")
+        self.assertEqual(t["id"], "T001")
+        self.assertTrue(os.path.exists(self.path("team", "tasks", "T001.json")))
+        self.assertEqual(self.run_cli("add", "tasks", "--id", "t001", "--title", "again").returncode, 1)
+        self.assertEqual(self.run_cli("add", "tasks", "--id", "../x", "--title", "bad").returncode, 1)
+        self.assertEqual(self.run_json("show", "t001")["title"], "first")
+
+    def test_sequential_ids(self):
+        with open(self.path("config.json")) as fh:
+            cfg = json.load(fh)
+        cfg["types"] = {"tasks": {"ids": "sequential"}}
+        with open(self.path("config.json"), "w") as fh:
+            json.dump(cfg, fh)
+        self.run_ok("add", "tasks", "--id", "T007", "--title", "seven")
+        self.assertEqual(self.run_json("add", "tasks", "--title", "next")["id"], "T008")
+        self.assertEqual(self.run_json("add", "tasks", "--title", "next")["id"], "T009")
+
+    def test_slice_estimate_lists_and_links(self):
+        self.run_ok("add", "tasks", "--id", "T001", "--title", "api")
+        t = self.run_json("add", "tasks", "--id", "T002", "--title", "screen", "--slice", "A", "--estimate", "8",
+                          "--depends", "T001", "--add", "requirements=MSG-01,MSG-02", "--add", "prs=#14")
+        self.assertEqual((t["slice"], t["estimate_hours"], t["requirements"], t["prs"]),
+                         ("A", 8.0, ["MSG-01", "MSG-02"], ["#14"]))
+        t = self.run_json("update", "T002", "--add", "prs=#15", "--add", "prs=#14", "--add", "figma=https://figma.com/x")
+        self.assertEqual(t["prs"], ["#14", "#15"])
+        self.assertEqual(t["figma"], ["https://figma.com/x"])
+        self.assertEqual(self.run_cli("add", "tasks", "--title", "x", "--depends", "T999").returncode, 1)
+        self.assertEqual(self.run_cli("update", "T002", "--goal", "G-none").returncode, 1)
+
+    def test_hours_and_history(self):
+        self.run_ok("add", "tasks", "--id", "T001", "--title", "api", "--estimate", "6")
+        self.run_ok("add", "tasks", "--id", "T002", "--title", "ui")
+        self.assertEqual(self.run_json("hours", "T001", "2.5", "--note", "wiring")["actual_hours"], 2.5)
+        self.run_ok("log", "More work", "--tasks", "T001", "--hours", "1.5")
+        self.run_ok("start", "T001")
+        t = self.run_json("done", "T001")
+        self.assertEqual(t["actual_hours"], 4.0)
+        fields = [(h["field"], h.get("to"), h.get("add")) for h in t["history"]]
+        self.assertEqual(fields, [("hours", None, 2.5), ("hours", None, 1.5), ("status", "doing", None),
+                                  ("status", "done", None)])
+        out = self.run_ok("log", "Both", "--tasks", "T001,T002", "--hours", "2")
+        self.assertIn("kept on the entry only", out)
+        self.assertEqual(self.run_json("show", "T001")["actual_hours"], 4.0)
+        entry = self.run_json("log", "Finish ui", "--done", "T002", "--hours", "1")
+        self.assertEqual(entry["tasks"], ["T002"])
+        t2 = self.run_json("show", "T002")
+        self.assertEqual((t2["status"], t2["actual_hours"]), ("done", 1.0))
+
+    def test_waiting_on_and_questions(self):
+        q = self.run_json("add", "questions", "--title", "Read receipts?", "--owner", "milan", "--waiting-on", "Client")
+        self.assertTrue(q["id"].startswith("Q-"))
+        self.assertEqual((q["status"], q["waiting_on"]), ("open", "Client"))
+        self.assertNotIn("waiting_on", self.run_json("update", q["id"], "--waiting-on", ""))
+        self.assertEqual(self.run_json("done", q["id"])["status"], "answered")
+
+
+class TestQA(RepoCase):
+    def test_testcases_and_bugs(self):
+        self.run_ok("add", "tasks", "--id", "T003", "--title", "badge")
+        tc = self.run_json("add", "tests", "--id", "TC-014", "--title", "caps at 99+", "--task", "T003", "--kind", "UI")
+        self.assertEqual((tc["status"], tc["kind"], tc["task"]), ("not_run", "ui", "T003"))
+        self.assertEqual(self.run_cli("update", "TC-014", "--result", "maybe").returncode, 1)
+        bug = self.run_json("add", "bugs", "--id", "BUG-007", "--title", "shows 100", "--task", "T003",
+                            "--severity", "Medium", "--set", "testcase=TC-014")
+        self.assertEqual((bug["status"], bug["severity"], bug["testcase"]), ("open", "medium", "TC-014"))
+        self.assertEqual(self.run_cli("add", "bugs", "--title", "x", "--severity", "enormous").returncode, 1)
+        self.assertEqual(self.run_cli("add", "bugs", "--title", "x", "--task", "T404").returncode, 1)
+        self.assertEqual(self.run_json("update", "TC-014", "--result", "fail", "--set", "bug=BUG-007")["bug"], "BUG-007")
+        fixed = self.run_json("update", "BUG-007", "--status", "fixed", "--set", "fix_commit=1234567")
+        self.assertEqual(fixed["fix_commit"], "1234567")
+        self.assertIn("done_at", fixed)
+        self.assertIn("done_at", self.run_json("update", "TC-014", "--result", "pass_with_question"))
+        summary = self.run_ok("summary")
+        self.assertIn("**Tests:** pass with question 1", summary)
+        self.assertIn("**Bugs:** fixed 1", summary)
+        self.assertIn("no problems", self.run_ok("validate"))
+
+    def test_requirement_ids_are_checked_once_listed(self):
+        self.run_ok("add", "tasks", "--id", "T001", "--title", "x", "--add", "requirements=MSG-01,MSG-02")
+        self.assertIn("no problems", self.run_ok("validate"))
+        self.run_ok("add", "requirements", "--id", "MSG-01", "--title", "List")
+        out = self.run_cli("validate")
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("MSG-02 is not in the requirements list", out.stdout)
+
+    def test_evidence_scan_and_web_link(self):
+        git(self.dir, "remote", "add", "origin", "https://user:secret@github.com/acme/app.git")
+        self.run_ok("add", "tasks", "--id", "T002", "--title", "screen")
+        self.run_ok("add", "tasks", "--id", "T0021", "--title", "other")
+        for rel in ("screenshots/T002-before.png", "ui-review/T002/after-fix.PNG", "screenshots/unrelated.png",
+                    "screenshots/notes.txt", "elsewhere/T002.png"):
+            self.write(rel, "x")
+        self.run_ok("build")
+        d = self.data()
+        self.assertEqual(d["git"]["web"], "https://github.com/acme/app")
+        self.assertNotIn("secret", json.dumps(d))
+        found = {e["path"]: (e["ids"], e["label"]) for e in d["evidence"]}
+        self.assertEqual(found, {"screenshots/T002-before.png": (["t002"], "before"),
+                                 "screenshots/unrelated.png": ([], ""),
+                                 "ui-review/T002/after-fix.PNG": (["t002"], "after")})
+
+
+class TestTableImport(RepoCase):
+    HUB = """\
+        # Hub
+
+        ## Tasks
+
+        | ID | Task | Slice | Status | Depends on | Est dev h | Actual h | Requirements | PR |
+        |----|------|-------|--------|------------|-----------|----------|--------------|----|
+        | T001 | List API | A | ✅ Done | — | 6 | 7 | MSG-01 | #12 |
+        | T002 | List screen | A | In progress | T001 | 8h | | MSG-01, MSG-02 | [#14](https://github.com/acme/app/pull/14) |
+        | T003 | Edit profile | D2 | Blocked | T002 | ~8 | | PD-03 | |
+
+        ## Test cases
+
+        | TC | Scenario | Task | Kind | Result | Bug |
+        |----|----------|------|------|--------|-----|
+        | TC-001 | Newest first | T001 | API | Pass | |
+        | TC-002 | Empty state | T002 | UI | Pass with question: is the copy final? | |
+        | TC-003 | Long names | T002 | UI | ❌ Fail | BUG-001 |
+        | TC-004 | Offline | T002 | UI | Blocked | |
+        | TC-005 | Tablet | T002 | UI | Not run | |
+        | TC-006 | Odd one | T002 | UI | Flaky on CI | |
+
+        ## Defects
+
+        | ID | Defect | Severity | Status | Task | Test case | Fix commit |
+        |----|--------|----------|--------|------|-----------|------------|
+        | BUG-001 | Names overflow | Major | Fixed | T002 | TC-003 | a1b2c3d |
+
+        ## Decisions
+
+        | ID | Decision | Owner | Status |
+        |----|----------|-------|--------|
+        | DEC-01 | Cursor pagination | Milan | Decided |
+        | DEC-02 | 25 MB limit | Priya | Pending |
+
+        ## Open questions
+
+        | ID | Question | Owner | Waiting on |
+        |----|----------|-------|------------|
+        | Q-01 | Is the copy final? | Milan | Design |
+
+        ## Requirements
+
+        | Req | Requirement |
+        |-----|-------------|
+        | MSG-01 | See conversations |
+        | MSG-02 | Pull to refresh |
+        | PD-03 | Edit profile |
+        """
+
+    def test_hub_tables(self):
+        self.write("hub.md", self.HUB)
+        preview = self.run_json("import", "hub.md", "--dry-run")
+        self.assertEqual({f["type"]: f["found"] for f in preview["files"]},
+                         {"tasks": 3, "testcases": 6, "bugs": 1, "decisions": 2, "questions": 1, "requirements": 3})
+        self.assertEqual(self.run_json("list"), [])
+        self.assertEqual(len(self.run_json("import", "hub.md")["created"]), 16)
+
+        t1, t2, t3 = (self.run_json("show", i) for i in ("T001", "T002", "T003"))
+        self.assertEqual((t1["status"], t1["slice"], t1["estimate_hours"], t1["actual_hours"], t1["prs"]),
+                         ("done", "A", 6, 7, ["#12"]))
+        self.assertNotIn("depends_on", t1)
+        self.assertEqual((t2["status"], t2["depends_on"], t2["estimate_hours"], t2["requirements"]),
+                         ("doing", ["T001"], 8, ["MSG-01", "MSG-02"]))
+        self.assertEqual(t2["prs"], ["https://github.com/acme/app/pull/14"])
+        self.assertEqual((t3["status"], t3["tags"], t3["estimate_hours"]), ("todo", ["blocked"], 8))
+
+        results = {r["id"]: r for r in self.run_json("list", "testcases")}
+        self.assertEqual([results["TC-00%d" % i]["status"] for i in range(1, 7)],
+                         ["pass", "pass_with_question", "fail", "blocked", "not_run", "not_run"])
+        self.assertIn("copy final", results["TC-002"]["status_note"])
+        self.assertEqual(results["TC-006"]["status_note"], "Flaky on CI")
+        self.assertEqual((results["TC-003"]["bug"], results["TC-003"]["kind"], results["TC-003"]["task"]),
+                         ("BUG-001", "ui", "T002"))
+
+        bug = self.run_json("show", "BUG-001")
+        self.assertEqual((bug["status"], bug["severity"], bug["testcase"], bug["fix_commit"]),
+                         ("fixed", "high", "TC-003", "a1b2c3d"))
+        decisions = {d["id"]: d for d in self.run_json("list", "decisions")}
+        self.assertEqual((decisions["DEC-01"]["status"], decisions["DEC-01"]["owner"]), ("accepted", "Milan"))
+        self.assertEqual(decisions["DEC-02"]["status"], "proposed")
+        q = self.run_json("show", "Q-01")
+        self.assertEqual((q["status"], q["waiting_on"]), ("open", "Design"))
+        self.assertEqual(self.run_json("show", "MSG-02")["title"], "Pull to refresh")
+        self.assertIn("no problems", self.run_ok("validate"))
+
+        again = self.run_json("import", "hub.md")
+        self.assertEqual((again["created"], again["updated"]), ([], []))
+
+    def test_update_refreshes_from_changed_rows(self):
+        self.write("hub.md", self.HUB)
+        self.run_ok("import", "hub.md")
+        with open(os.path.join(self.dir, "hub.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        text = text.replace("| T002 | List screen | A | In progress |", "| T002 | List screen | A | Done |")
+        text = text.replace("| TC-005 | Tablet | T002 | UI | Not run |", "| TC-005 | Tablet | T002 | UI | Pass |")
+        with open(os.path.join(self.dir, "hub.md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        self.assertEqual(self.run_json("import", "hub.md")["updated"], [])
+        self.assertEqual(self.run_json("show", "T002")["status"], "doing")
+        self.assertEqual(sorted(self.run_json("import", "hub.md", "--update")["updated"]), ["T002", "TC-005"])
+        t2 = self.run_json("show", "T002")
+        self.assertEqual(t2["status"], "done")
+        self.assertEqual(t2["history"][-1]["to"], "done")
+        self.assertEqual(self.run_json("show", "TC-005")["status"], "pass")
+
+    def test_table_type_from_file_name_and_export(self):
+        self.write("docs/defects.md", """\
+            | # | Title | Sev | State |
+            |---|-------|-----|-------|
+            | 1 | Crash on open | S1 | Open |
+            | 2 | Typo | trivial | Won't fix |
+            """)
+        self.run_ok("import", "docs/defects.md")
+        bugs = {b["id"]: b for b in self.run_json("list", "bugs")}
+        self.assertEqual((bugs["B1"]["severity"], bugs["B1"]["status"]), ("critical", "open"))
+        self.assertEqual((bugs["B2"]["severity"], bugs["B2"]["status"]), ("low", "wontfix"))
+        out = self.run_ok("export", "--type", "bugs")
+        self.assertIn("| B1 | Crash on open | open | critical |", out)
+
+    def test_checkbox_file_still_imports_as_list(self):
+        self.write("tasks.md", """\
+            ## Todo
+            - [ ] Parent
+              - [x] Child
+            """)
+        self.run_ok("import", "tasks.md")
+        tasks = {t["title"]: t for t in self.run_json("list", "tasks")}
+        self.assertEqual(tasks["Child"]["parent"], tasks["Parent"]["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
